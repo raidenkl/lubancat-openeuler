@@ -1,0 +1,18 @@
+* text=auto eol=lf
+
+# 二进制：禁行尾转换与内容 diff
+*.img       binary
+*.img.*     binary
+*.bin       binary
+*.itb       binary
+*.dtb       binary
+*.elf       binary
+*.so        binary
+*.so.*      binary
+*.a         binary
+*.rpm       binary
+*.deb       binary
+*.tar.gz    binary
+*.tar.zst   binary
+*.xz        binary
+*.zst       binary

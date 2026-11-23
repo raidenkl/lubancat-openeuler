@@ -1,0 +1,23 @@
+LubanCat openEuler
+Copyright (c) 2026 raidenkl and contributors
+
+This repository contains software derived from the openEuler SBC-sig project:
+
+  Project : openEuler SBC-sig
+  Upstream: https://atomgit.com/openeuler/SBC-sig
+  Baseline: commit 521f1ae01de979bf4c18d577be2c18cd1f2e9824
+  License : MulanPSL-2.0 (see LICENSE)
+
+Files under scripts/, documents/ and the upstream part of the repository are
+derived from the baseline above. Local modifications are recorded in the
+commits that follow the baseline import commit (the first commit of this
+repository contains the unmodified upstream tree) and are summarised in
+docs/upstream-sync.md.
+
+Third-party components bundled in this repository (Rockchip proprietary
+blobs such as libmali / librkaiq / librknnrt, linux-firmware, prebuilt
+u-boot and loader binaries) retain their original licenses. See
+docs/third-party.md before redistributing them.
+
+This is an independent downstream project. It is NOT affiliated with or
+endorsed by the openEuler community or by EmbedFire.

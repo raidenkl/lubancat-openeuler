@@ -1,3 +1,4 @@
+# ── 上游 SBC-sig 原有的忽略规则（保留，勿删）──────────────
 /scripts/firmware
 /scripts/firmware-nonfree
 /scripts/bluez-firmware
@@ -11,3 +12,45 @@
 /scripts/rootfs*
 /scripts/img
 /scripts/build
+
+# ── 源码克隆与打包中间产物 ──────────────────────────────
+/src/
+/pkg/rpmbuild/
+/logs/
+
+# ── build/ 只放行辅助脚本，其余全部忽略 ─────────────────
+# 注意：必须写成 /build/** 而不是 /build/，否则下面的白名单不生效
+/build/**
+!/build/*.sh
+!/build/*.spec
+/build/**/*.img
+/build/**/*.img.*
+
+# 镜像产物（不要写全局 *.img，会误伤 scripts/bin/ 下上游跟踪的 recovery.img 等）
+*.img.xz
+*.img.zst
+*.img.gz
+
+# ── 备份与临时文件 ───────────────────────────────────
+*.orig
+*.orig-*
+*.rej
+*.bak
+*.swp
+*~
+
+# ── 工作区/编辑器 ────────────────────────────────────
+.workspace-owner
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+
+# ── 本地覆盖配置与密钥 ────────────────────────────────
+conf.local
+*.conf.local
+*.pem
+*.key
+!**/*.pub
