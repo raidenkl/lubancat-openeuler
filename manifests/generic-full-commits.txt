@@ -1,0 +1,4 @@
+device/rockchip          9565108a5dcc75920b804e272a4a46ac63007295
+kernel-6.1               6ff00891d500459251c0ef286f2b0130e75106e1
+u-boot                   8f53f800da2c25d0c6ba414fb45902a01675703a
+rkbin                    58a39b47f77a26a1e110fa1a1ce80bcfcb0b3505

@@ -1,0 +1,37 @@
+image=openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha5
+built_at=2026-11-23T02:57Z..03:08Z
+layout=vendor
+image_path=src/SBC-sig/scripts/build/2026-11-23/openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha5.img.xz
+image_xz_sha256=ca3569c9a883061ab22b35d6eb02d06451ea673d107aeb4dbcfc6de8dd733441
+rootfs_uuid=6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01
+base=alpha4 rootfs.img（复用，未重跑 build_rootfs）
+
+# ---- 固化项（用户选择 A1 A2 A3 A4 A5 B1 C1）----
+A1=mali 包内置 libmali-hook.so.1.9.0（14408B）+ 两个符号链接（镜像内已校验 3 个文件）
+A2=移除 /etc/profile.d/mali.sh 的全局 LD_LIBRARY_PATH；新增 /usr/local/bin/mali-env 按需启用 GPU
+A3=breeze/breeze-dark/ukui/ukui-classical 的 cursors 各补齐 123 个（源自 Adwaita）
+A4=/etc/xdg/kcminputrc + /etc/skel/.config/kcminputrc（cursorTheme=Adwaita,size=24）+ /etc/environment XCURSOR_*
+A5=/etc/lightdm/lightdm.conf.d/50-autologin.conf（autologin-user=lubancat, timeout=0, session=ukui）
+B1=iw + wireless-regdb + NetworkManager-wifi 已安装
+C1=/usr/lib64/librknnrt.so（7259064B）
+
+# ---- 未包含（用户未选）----
+D1_D2=camera_engine_rkaiq 未固化 → 新烧录后 MIPI 摄像头仍会「黑屏+偏绿」，需手动启动 rkaiq_3A_server
+C2=rknn 自检程序与模型未放 /opt
+D3=摄像头 overlay 未写入 uEnv 模板
+E1_E2=DTS 清理与 polkit rfkill 规则未做
+
+# ---- 校验记录 ----
+verify1=内核模块 299 个 ko，modules.dep 299 行
+verify2=uEnv/extlinux/rootfs UUID 三方一致 6f1c2a10…
+verify3=镜像内 A1-A5/B1/C1 全部命中；/etc/iqfiles 与 rkaiq 二进制确认不存在（符合未选 D1）
+verify4=kernel-modules 段日志：install kernel modules 6.1.99-rk3588 into rootfs: 299 ko
+
+# ---- 构建脚本改动（后续重跑 build_rootfs 也会生效）----
+conf=src/SBC-sig/scripts/boards/lubancat-5.conf 的 POST_BOARD_OVERLAY（mali-env/cursors/kcminputrc/autologin/librknnrt）
+asset1=src/SBC-sig/scripts/bin/libmali/mali-g610-g24p0.tar.gz（已含 hook，原件备份 .orig-20261123）
+asset2=src/SBC-sig/scripts/bin/npu/librknnrt.so（7.0MB）
+rpmlist=rpmlist 与 rpmlist-lubancat-desktop 均已含 iw/wireless-regdb/NetworkManager-wifi
+build_sh=默认 vendor 布局，--layout gpt 可回退
+
+flash=upgrade_tool uf <img> 或 RKDevTool（MaskRom）；不能 dd

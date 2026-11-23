@@ -1,0 +1,27 @@
+image=openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha1
+built_at=2026-11-19T08:37:20+00:00
+image_xz=./src/SBC-sig/scripts/build/2026-11-19/openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha1.img.xz
+image_xz_size=834729720
+image_xz_sha256=a04718e3ce7759640bb8d64f684fde9425250f4b8bba07ee34a395024286bdc0
+kernel_repo=git@github.com:LubanCat/kernel.git branch=lbc-develop-6.1
+kernel_commit=32112b00d20a7b72b59ad21b068c1541da6fc0d2
+kernel_release=6.1.99-rk3588
+uboot_commit=a564b1d927aa6032520819536a5b8c450e8141c4
+rkbin_commit=74213af1e952c4683d2e35952507133b61394862
+sbc_sig_commit=521f1ae01de979bf4c18d577be2c18cd1f2e9824
+board_conf=scripts/boards/lubancat-5.conf
+bootmode=extlinux dtb=rk3588-lubancat-5.dtb boot_size=256MiB part_table=gpt
+bootargs=see-image
+defconfig_override=configs/common/lubancat_linux_rk3588_defconfig (CONFIG_WERROR off)
+root_password=openeuler (alpha, must change before release)
+
+# ---- alpha2 (2026-11-19T09:13Z) eMMC bring-up fixes ----
+image=openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha1
+image_xz=./src/SBC-sig/scripts/build/2026-11-19/openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha1.img.xz
+image_xz_size=842481296
+image_xz_sha256=abb635c779174d958deffb9d4ba390b3419ee3379e5af626087e1741b0d1ab76
+fix1=DTB /chosen/bootargs 去掉 root=PARTUUID=614e0000-0000 占位值（见 0001 补丁），让 extlinux 的 root=UUID 生效
+fix2=extlinux 移除 initrd（dracut 在 x86_64 容器生成的 initramfs 无法在 aarch64 执行，报 ENOEXEC -8）
+kernel_release=6.1.99-rk3588
+rootfs_uuid=d0fd6892-b75d-44c7-b1b3-b59735a91342
+note=console 仍由 DTB 覆盖为 ttyFIQ0；串口有内核日志但可能无 getty 登录提示

@@ -1,0 +1,3 @@
+os=linux arch=arm64 id=sha256:e79b1c8ed278fb5d14f868264211b28ad3da8e3792ff017f28a4b17ba41d3c99 size=204252807 digest=openeuler/openeuler@sha256:03b3f365bbba13e9f90c70b08bd9aa0002bc69db858c2808cfab8a55d6e184e3
+aarch64
+openEuler release 24.03 (LTS-SP3)

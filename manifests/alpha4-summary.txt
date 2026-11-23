@@ -1,0 +1,30 @@
+image=openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha4
+built_at=2026-11-20T09:07Z..09:18Z
+layout=vendor  # Rockchip rk-boot: parameter + package-file + afptool/rkImageMaker（今后默认）
+image_path=src/SBC-sig/scripts/build/2026-11-20/openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha4.img.xz
+image_xz_size=2097152K (2.0G 量级)
+image_xz_sha256=4b4d058311cc13692c852148586b0ed0d2f2082ef8c6b81a4ffbdf5bd61dae4d
+rootfs_uuid=6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01
+kernel=6.1.99-rk3588 (LubanCat kernel lbc-develop-6.1 @32112b00)
+uboot=rk3588_defconfig (bootdelay=3, a564b1d9)
+
+# ---- 本版变更 ----
+change1=gen_rk_update.sh 新增「4.1 内核模块入 rootfs」段：挂载 rootfs.img → cp -rfp modules → depmod -b → umount
+change2=rootfs 装入 299 个内核模块（rtw88_8822ce/rtw88_8822c/rtw88_pci/rtw88_core、option/usb_wwan、btusb/btrtl 等），modules.dep 299 行
+change3=rootfs 补 iw / wireless-regdb / NetworkManager-wifi（dnf 报 GPG key 不匹配，用 --nogpgcheck 安装，rpm -V 无差异）
+change4=build.sh 默认打包后端改为 vendor（--layout gpt 可回退到 gen_image.sh），符合“以后不再用 SBC-sig 通用布局”
+change5=清理 /var/cache/dnf 后再打包
+
+# ---- 校验记录 ----
+verify1=/lib -> usr/lib 符号链接正常（usrmerge）
+verify2=vermagic=6.1.99-rk3588 SMP mod_unload aarch64（与 /boot/Image 一致）
+verify3=default.target -> graphical.target；/usr/share/xsessions/ukui.desktop；/usr/libexec/lubancat/board-init.sh 存在
+verify4=uEnv/extlinux/rootfs 三方 UUID 一致（gen_rk_update 内建校验通过）
+verify5=rkImageMaker -unpack 可还原 boot.bin + firmware.img（脚本内建校验通过）
+
+# ---- 与 alpha3 的差异（重要） ----
+note_alpha3=alpha3-desktop.img.xz 生成于 07:18，而 UKUI 在 08:06 才装完、rootfs.img 08:09 才落盘
+note_alpha4=alpha4 才是第一版真正含完整 UKUI 桌面 + 内核模块的镜像，因此体积 2.0G（alpha3 的 862M 是未装完桌面的 rootfs）
+
+# ---- 烧录 ----
+flash=upgrade_tool uf <img> 或 RKDevTool（MaskRom）；此布局不能 dd

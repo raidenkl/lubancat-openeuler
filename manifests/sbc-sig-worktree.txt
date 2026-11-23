@@ -1,0 +1,2 @@
+?? scripts/bin/u-boot/lubancat-5/
+?? scripts/boards/lubancat-5.conf

@@ -1,0 +1,9 @@
+--- /work/src/SBC-sig/scripts/build/kernel/arch/arm64/configs/lubancat_linux_rk3588_defconfig	2026-11-19 08:00:32.846131566 +0000
++++ /work/src/SBC-sig/scripts/configs/common/lubancat_linux_rk3588_defconfig	2026-11-19 08:04:51.971444261 +0000
+@@ -928,3 +928,6 @@
+ CONFIG_FUNCTION_TRACER=y
+ CONFIG_BLK_DEV_IO_TRACE=y
+ CONFIG_LKDTM=y
++
++# alpha1: GCC 12 treats vendor Wi-Fi driver warnings as errors; disable WERROR for image bring-up
++# CONFIG_WERROR is not set

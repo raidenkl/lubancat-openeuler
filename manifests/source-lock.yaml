@@ -1,0 +1,30 @@
+schema: lubancat-openeuler/source-lock/v1
+generated_utc: 20261119T041848Z
+docker_image: openeuler/openeuler:24.03-lts-sp3
+clone_depth: 1
+repos:
+  - name: "kernel-bsp-6.1"
+    url: "https://github.com/LubanCat/kernel.git"
+    branch: "lbc-develop-6.1"
+    commit: "32112b00d20a7b72b59ad21b068c1541da6fc0d2"
+    remote_branch_tip: "32112b00d20a7b72b59ad21b068c1541da6fc0d2"
+  - name: "u-boot"
+    url: "https://github.com/LubanCat/u-boot.git"
+    branch: "main"
+    commit: "a564b1d927aa6032520819536a5b8c450e8141c4"
+    remote_branch_tip: "a564b1d927aa6032520819536a5b8c450e8141c4"
+  - name: "rkbin"
+    url: "https://github.com/LubanCat/rkbin.git"
+    branch: "master"
+    commit: "74213af1e952c4683d2e35952507133b61394862"
+    remote_branch_tip: "74213af1e952c4683d2e35952507133b61394862"
+  - name: "SBC-sig"
+    url: "https://atomgit.com/openeuler/SBC-sig.git"
+    branch: "master"
+    commit: "521f1ae01de979bf4c18d577be2c18cd1f2e9824"
+    remote_branch_tip: "521f1ae01de979bf4c18d577be2c18cd1f2e9824"
+  - name: "kernel-oe-6.6"
+    url: "https://gitee.com/openeuler/rockchip-kernel.git"
+    branch: "openEuler-24.03-LTS"
+    commit: "97488b8e6d30e1c49bf0df20d7f408ea9232c13e"
+    remote_branch_tip: "97488b8e6d30e1c49bf0df20d7f408ea9232c13e"

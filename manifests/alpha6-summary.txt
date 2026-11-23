@@ -1,0 +1,28 @@
+image=openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha6
+built_at=2026-11-23T04:00Z..04:26Z
+layout=vendor
+image_path=src/SBC-sig/scripts/build/2026-11-23/openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha6.img.xz
+image_xz_sha256=7b235c5b61ef38caff2d0aac8fb4b46cfc6082f082214b64af29a11399793518
+rootfs_uuid=6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01
+base=alpha5 rootfs.img + 多媒体固化 + 摄像头 RPM 预置
+
+multimedia_librga=2.2.0（2.1.0 缺 RK_FORMAT_YCbCr_422_SP_10B，gst 编译失败）
+multimedia_mpp=1.5.0（librockchip_mpp.so.0 实体 + .so.1/.so 三层链接）
+multimedia_vpu=1.5.0
+multimedia_gst=板卡源码编译（gstreamer 1.22.5），libgstrockchipmpp.so + libgstrkximage.so，kmssrc 不编
+multimedia_demos=9 个 MPP 自检工具装入 /usr/bin
+multimedia_udev=99-rockchip-permissions.rules -> /etc/udev/rules.d/
+rpm_seeded=/opt/rpms/camera-engine-rkaiq-6.9.0-1.lbc5.aarch64.rpm（14 个 IQ 全量）
+
+verify_mpp_enc=1080p H.264 60 帧 222.86 fps，输出 623KB
+verify_mpp_dec=833.37 fps，max mem 15.94MB
+verify_gst=gst-inspect rockchipmpp OK；mppvideodec 解码到 EOS
+verify_rga=librga.so.2 链接完整，gst 插件 NEEDED 满足
+verify_audio_card0=PCM RUNNING 48000Hz（需人耳确认）
+verify_audio_hdmi=card1/3 可打开但无 ELD，记 INFO
+known_issue=摄像头模组当前不在位（i2c-1 无应答），颜色复验待接回；板卡仍为 alpha5
+
+conf=boards/lubancat-5.conf 的 POST_BOARD_OVERLAY 已含 multimedia 段与 RPM 预置
+assets=scripts/bin/multimedia/{rga,mpp,gst,demos,rules}、scripts/bin/rpms/
+spec=pkg/SPECS/camera-engine-rkaiq.spec（unit 的 StartLimit 已移到 [Unit]）
+flash=upgrade_tool uf / RKDevTool（MaskRom），不能 dd

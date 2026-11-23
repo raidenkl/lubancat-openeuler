@@ -1,0 +1,71 @@
+# alpha2 (2026-11-20)
+image=./src/SBC-sig/scripts/build/2026-11-20/openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha2.img.xz
+sha256=5a445083ed7a9141b26212087e4c3b541d7f1ac5f1ad5880ba52a6fd5bbf7288
+rootfs_uuid=88b4e89f-b3a8-4722-899d-8145624bfcb3
+boot_fs=ext2 (256MiB, LABEL=boot, GPT name=boot)
+extboot=Image-6.1.99-rk3588 + boot.scr + dtb(12) + dtb/overlay(278) + uEnv(10) + rk-kernel.dtb + extlinux(fallback)
+boot_time=93.5s -> 7.8s (mask serial-getty@ttyS2 / NetworkManager-wait-online / dnf-makecache.timer)
+accounts=root:openeuler lubancat:lubancat(NOPASSWD sudo)
+board_init=first boot reads SARADC, selects dtb/uEnv, reboots once
+
+# ---- alpha2 v3 (2026-11-20T03:43Z) 修复 initrd 架构 + 固定 rootfs UUID ----
+image=./src/SBC-sig/scripts/build/2026-11-20/openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha2.img.xz
+image_size=852044668
+image_sha256=13b18da3d0efc25be6682a9fa67e699dc94ac64142c04cb12e3f79acc8a79b99
+rootfs_uuid=6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01  # 固定值，gen_image.sh 的 rootfs_uuid，后续构建不再变
+fix3=initrd 改为在 aarch64 rootfs.img 内 chroot + DRACUT_ARCH=aarch64 生成（新增 scripts/mk_initrd.sh）
+fix3_note=此前 build_boot.sh 用宿主 dracut --no-kernel，在 x86_64 容器里把 x86 用户态打进 initramfs，板卡 Run /init 报 ENOEXEC(-8)
+fix4=gen_image.sh mkfs.ext4 增加 -U ${rootfs_uuid}，rootfs UUID 固定，避免每次重建都要整盘重烧
+uEnv=cmdline 携带 root=UUID=6f1c2a10... + rd.shell；generic 与 uEnvLubanCat5 均已同步替换
+extlinux=兜底路径保留，含 initrd 行与同一固定 UUID
+boot=ext2 256MiB，GPT 分区名 boot/rootfs，idbloader@64、u-boot.itb@16384
+
+# ---- alpha2 v4 (2026-11-20T04:00Z) 修复 dtbo 读取与 FDT 空间 ----
+image=./src/SBC-sig/scripts/build/2026-11-20/openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha2.img.xz
+image_size=863386944
+image_sha256=4cd38d89f09e5c674df14eb92bd2e59651abad07b86aa22cdeaac431600d6cae
+rootfs_uuid=6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01
+fix5=boot.cmd 在 dtfile 前补 setenv dev_bootpart ${devnum}:${distro_bootpart}（dtoverlay.c 用它定位 dtbo 分区；缺失时读 mmc <NULL> -> err -9 -> SError 复位）
+fix6=boot.cmd 在 fdt set /chosen bootargs 前加 fdt resize 0x10000，避免 FDT_ERR_NOSPACE 导致 cmdline 写入失败
+preflight=三个启用 overlay（hdmi0-vp0 / dp0-vp1 / hdmi1-vp2）已用 fdtoverlay 离线叠加到 rk3588-lubancat-5.dtb 验证通过
+note=上一版日志说明系统曾成功进入 userspace：/uEnv/uEnv.txt 已被 board-init 换成 uEnvLubanCat5（overlays=1），这是第二次启动在 U-Boot 阶段崩溃
+
+# ---- B: vendor layout backend (2026-11-20T05:00Z) ----
+image=./src/SBC-sig/scripts/build/2026-11-20/openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-vendor.img.xz
+image_size=885282272
+image_sha256=b8737473bd538badbd3a09e0fa5d1fa2ff87fe7a35d1bee0b39e382bab83aded
+script=src/SBC-sig/scripts/gen_rk_update.sh  # 新增，与 gen_image.sh 并存
+parameter=uboot 0x2000@0x4000, boot 0x80000@0x6000, rootfs grow@0x86000
+tools=scripts/bin/tools/rockchip/rk3588-pack/{afptool,rkImageMaker}（上游已跟踪，需 chmod +x）
+bootloader=rk3588_spl_loader_v1.19.113.bin (481K) -> MiniLoaderAll.bin
+uboot_img=u-boot.itb (983K, FIT atf/optee/uboot)
+uuid_fix=① boot 分区 uEnv/extlinux 的占位 614e0000 替换为 6f1c2a10；② rootfs.img e2fsck -fy + tune2fs -U 6f1c2a10
+verified=sha256 解压校验 OK；afptool/rkImageMaker 双向解包尺寸一致；uEnv 与 rootfs UUID 一致；boot.scr 含 dev_bootpart；initrd AArch64
+flash=upgrade_tool uf 或 RKDevTool（MaskRom），不可 dd（与 GPT 镜像布局不同）
+
+# ---- alpha2 实机验收 (2026-11-20T13:45Z, vendor 镜像, 板卡 192.168.103.104) ----
+result=PASS=50 FAIL=0 WARN=0 INFO=4
+startup=kernel 1.729s + initrd 1.461s + userspace 5.088s = 8.279s
+reboot=连续 3 次重启：SSH 恢复 20.8/21.1/21.1s，总启动 8.20/8.28/8.24s，failed=0，IP 稳定
+layout=vendor: p1 uboot(4MiB, FIT d00dfeed) / p2 boot(256MiB ext2) / p3 rootfs(grow, ext4)
+loader=sector64 RKNS；cmdline boot_part=2 与 p2 一致；root=UUID=6f1c2a10（uEnv/extlinux/rootfs 三方一致）
+board_id=0402 -> rk3588-lubancat-5-v2.dtb（ADC ch2=2714 ch3=1638，阈值 916/1376/1840/2380/2928/3432/3900/4096，与厂商 boot_init.sh 一致）
+dtbo=基础 DTB 中 hdmi0/hdmi1/dp0 均 disabled，运行时均 okay -> dtfile 确实生效
+storage=dd 200MB 直写 160-171MB/s，校验一致，dmesg 无存储错误；根分区剩余 108G
+network=end1 DHCP 192.168.103.104，网关/外网/DNS 通；end0 无载波（未插线）
+known_issue_1=HDMI0 热插拔会崩：hdptx phy pll can't lock -> dclk enable 失败 -> 后续 regmap 读寄存 SError -> PMIC SPI/I2C 超时挂死（见第 5 份串口日志）
+known_issue_2=rk-pcie fe150000 failed to initialize host；fe170000/fe190000 Link Fail（疑似空 M.2 槽，待插卡确认）
+known_issue_3=systemd: Failed to find module 'autofs4'（内核未启用该模块，无功能影响）
+known_issue_4=ttyFIQ0 tty_port_close_start count=1 port=2 告警（fiq-debugger 已知噪声）
+
+# ---- A/B: U-Boot 改用 rk3588_defconfig (2026-11-20T06:24Z) ----
+image=./src/SBC-sig/scripts/build/2026-11-20/openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-vendor-ubrk3588.img.xz
+image_size=885258520
+image_sha256=a35ccab06bef3ce819ae1701559524a8d5d9c7e699c7b0e78d116c2efcffbc22
+uboot_config=rk3588_defconfig (DEFAULT_DEVICE_TREE=rk3588-evb)
+uboot_build=host aarch64-linux-gnu-gcc 11.4, LubanCat/u-boot a564b1d9
+changed=仅 U-Boot proper；DDR/SPL/ATF/OP-TEE 仍来自 rkbin (v1.19/v1.13/v1.51/v1.20)，MiniLoaderAll 与上一版逐字节相同
+extra=bootdelay 0->3（仅改默认 env 字符串，便于串口 Ctrl+C 中断）；u-boot.bin 与 u-boot-nodtb.bin 均已置 3
+uboot_img=989696 bytes, FIT: uboot/atf-1/atf-2/atf-3/optee/fdt，内嵌 DTB=rockchip,rk3588-evb
+note=该镜像同时用于恢复被 SDK dtb 实验弄挂的板卡
+build_issue=rk3588_defconfig + GCC12 会在厂商 cmd/dtfile.c:116 (-Werror=address) 失败，改用宿主 GCC11 通过
