@@ -1,0 +1,16 @@
+[Unit]
+Description=LubanCat first boot configuration (unique machine-id/hostname/ssh keys)
+Documentation=https://github.com/raidenkl/lubancat-openeuler/blob/main/docs/security-notes.md
+# 镜像内 /etc/machine-id 被截断为空，systemd 将本次启动标记为 FirstBoot
+ConditionFirstBoot=yes
+ConditionPathExists=!/var/lib/lubancat/firstboot.done
+After=local-fs.target systemd-machine-id-commit.service
+Wants=systemd-machine-id-commit.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/lubancat/firstboot.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

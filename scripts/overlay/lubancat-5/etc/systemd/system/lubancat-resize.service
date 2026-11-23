@@ -1,0 +1,14 @@
+[Unit]
+Description=Grow root partition and filesystem to fill storage
+Documentation=https://github.com/raidenkl/lubancat-openeuler/blob/main/docs/building.md
+# 刷到更大的 eMMC/SD 卡后，首启动把 rootfs 扩到整盘
+ConditionPathExists=!/var/lib/lubancat/.rootfs-resized
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/lubancat/resize-rootfs.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
