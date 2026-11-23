@@ -30,3 +30,7 @@ xorg-x11-apps
 iw
 wireless-regdb
 NetworkManager-wifi
+v4l-utils
+i2c-tools
+usbutils
+gstreamer1-plugins-bad-free
