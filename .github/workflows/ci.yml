@@ -35,7 +35,8 @@ jobs:
 
       - name: 敏感信息扫描
         run: |
-          hits=$(git grep -nE '10\.255\.[0-9]+\.[0-9]+|BEGIN [A-Z ]*PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|github_pat_' -- . || true)
+          # -I 忽略二进制：vendor 库里带有 Rockchip 自己的编译路径，属正常
+          hits=$(git grep -nIE '10\.255\.[0-9]+\.[0-9]+|BEGIN [A-Z ]*PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|github_pat_' -- . || true)
           if [ -n "$hits" ]; then
             echo "::error::疑似内网地址或密钥："
             echo "$hits"
