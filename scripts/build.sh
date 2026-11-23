@@ -16,6 +16,8 @@ Options:
   -r, --repo REPO_INFO                 The URL/path of target repo file or list of repo's baseurls which should be a space separated list.
   -s, --spec SPEC                      The image's specification: headless, xfce, ukui, dde, gnome, devstation or the file path of rpmlist. The default is headless.
   --cores N                            The number of cpu cores to be used during making.
+  --layout gpt|vendor                  Boot image layout. vendor = Rockchip rk-boot/parameter
+                                       (upgrade_tool/RKDevTool, 默认); gpt = SBC-sig 通用 GPT (dd 整盘).
   -h, --help                           Show command help.
 "
 
@@ -47,6 +49,7 @@ default_param() {
     kernel_url="https://atomgit.com/openeuler/rockchip-kernel.git"
     nonfree_bin_dir=${cur_dir}/bin
     workdir=${cur_dir}/build
+    bootlayout=vendor
     name=${branch}-${board}-aarch64-alpha1
     make_cores=$(nproc)
 }
@@ -112,6 +115,10 @@ parseargs()
             shift
         elif [ "x$1" == "x-s" -o "x$1" == "x--spec" ]; then
             spec_param=`echo $2`
+            shift
+            shift
+        elif [ "x$1" == "x--layout" ]; then
+            bootlayout=`echo $2`
             shift
             shift
         elif [ "x$1" == "x--cores" ]; then
@@ -229,4 +236,13 @@ if [[ $(cat ${workdir}/.done | grep rootfs) != "rootfs" ]];then
     bash ${cur_dir}/build_rootfs.sh
 fi
 
-bash ${cur_dir}/gen_image.sh -n ${name} --board ${board}
+case "${bootlayout}" in
+    gpt)
+        LOG "boot layout: gpt (SBC-sig generic, dd whole disk)"
+        bash ${cur_dir}/gen_image.sh -n ${name} --board ${board}
+        ;;
+    vendor|*)
+        LOG "boot layout: vendor (Rockchip rk-boot / parameter)"
+        bash ${cur_dir}/gen_rk_update.sh -n ${name} -b ${board}
+        ;;
+esac

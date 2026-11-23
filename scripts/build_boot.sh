@@ -31,6 +31,8 @@ default_param() {
     platform=rockchip
     kernel_url="https://atomgit.com/openeuler/rockchip-kernel.git"
     boot_dir=${workdir}/boot
+    extboot_dir=${workdir}/extboot
+    boot_fs=${boot_fs:-ext2}
     log_dir=${workdir}/log
     make_cores=$(nproc)
 }
@@ -256,13 +258,68 @@ install_kernel() {
     popd
 }
 
+mk_extboot() {
+    # 组装 Rockchip extboot 布局：boot.scr + uEnv/ + dtb/ + dtb/overlay/
+    LOG "start assemble extboot dir..."
+    kernelrelease=$(make -s -C ${workdir}/kernel kernelrelease)
+    [ -n "${kernelrelease}" ] || { ERROR "get kernelrelease failed"; exit 2; }
+
+    rm -rf ${extboot_dir}
+    mkdir -p ${extboot_dir}/dtb/overlay ${extboot_dir}/uEnv ${extboot_dir}/extlinux
+
+    pushd ${workdir}/kernel >/dev/null
+    cp arch/arm64/boot/Image ${extboot_dir}/Image-${kernelrelease}
+    cp arch/arm64/boot/Image ${extboot_dir}/Image
+    cp System.map            ${extboot_dir}/System.map-${kernelrelease}
+    cp .config               ${extboot_dir}/config-${kernelrelease}
+    cp arch/arm64/boot/dts/${platform}/${dtb_name}.dtb ${extboot_dir}/rk-kernel.dtb
+    cp arch/arm64/boot/dts/${platform}/*.dtb            ${extboot_dir}/dtb/
+    cp arch/arm64/boot/dts/${platform}/overlay/*.dtbo   ${extboot_dir}/dtb/overlay/ 2>/dev/null || true
+    popd >/dev/null
+
+    # uEnv 展平到 /uEnv/（与 BSP 一致，保证 uEnv.txt 同目录相对软链可用）
+    cp ${workdir}/kernel/arch/arm64/boot/dts/${platform}/uEnv/*.txt ${extboot_dir}/uEnv/ 2>/dev/null || true
+    cp ${workdir}/kernel/arch/arm64/boot/dts/${platform}/uEnv/${soc_name}/*.txt ${extboot_dir}/uEnv/ 2>/dev/null || true
+    [ -f ${extboot_dir}/uEnv/uEnv.txt ] || { ERROR "uEnv.txt not found in kernel tree"; exit 2; }
+    for f in ${extboot_dir}/uEnv/*.txt; do
+        sed -i "s|^uname_r=.*|uname_r=${kernelrelease}|" "$f"
+        # uEnv 原本没有 initrd= 行时，上面的替换不会生效；统一先删再插（与 BSP mk-kernel.sh 一致）
+        sed -i "/^initrd=/d" "$f"
+        sed -i "/^uname_r=/a initrd=initrd.img" "$f"
+        # cmdline 里补 root= 占位，由 gen_image.sh 统一替换成真实 ext4 UUID
+        # rd.shell：挂根失败时落到 initramfs 救援 shell，便于串口现场定位
+        sed -i "s|^cmdline=\"\(.*\)\"|cmdline=\"\1 root=UUID=614e0000-0000-4b53-8000-1d28000054a9 rd.shell\"|" "$f"
+        # 无屏场景默认关闭 gsdt 自动探测，避免 i2c 探测噪声
+        sed -i "s|^enable_gsdt_auto_load=.*|enable_gsdt_auto_load=0|" "$f"
+    done
+
+    cp ${cur_dir}/configs/common/boot.cmd ${extboot_dir}/boot.cmd
+    mkimage -C none -A arm64 -T script -d ${extboot_dir}/boot.cmd ${extboot_dir}/boot.scr >/dev/null
+    cp ${boot_dir}/initrd.img ${extboot_dir}/initrd.img 2>/dev/null || true
+    cp -a ${boot_dir}/extlinux ${extboot_dir}/ 2>/dev/null || true
+
+    LOG "extboot dir ready: Image-${kernelrelease}, $(ls ${extboot_dir}/dtb/*.dtb | wc -l) dtb, $(ls ${extboot_dir}/dtb/overlay/*.dtbo 2>/dev/null | wc -l) dtbo, $(ls ${extboot_dir}/uEnv/*.txt | wc -l) uEnv"
+}
+
 mk_boot() {
     LOG "start make bootimg..."
     if [ "x${board}" != "xraspberrypi" ]; then
 
-        LOG "start gen initrd..."
-        dracut --no-kernel ${boot_dir}/initrd.img
-        LOG "gen initrd done."
+        # initrd 必须是目标架构(aarch64)。本脚本运行在 x86_64 构建容器里，直接执行
+        # dracut 会把容器的 x86-64 用户态打进 initramfs，板卡执行 /init 报 ENOEXEC(-8)。
+        # 因此优先使用调用方预置的 initrd.img，否则从 aarch64 rootfs.img 内生成。
+        mkdir -p ${boot_dir}
+        if [ -s ${boot_dir}/initrd.img ]; then
+            LOG "use provided initrd: $(ls -lh ${boot_dir}/initrd.img | awk '{print $5}')"
+        elif [ -f ${workdir}/rootfs.img ]; then
+            LOG "start gen aarch64 initrd from rootfs.img..."
+            bash ${cur_dir}/mk_initrd.sh --rootfs ${workdir}/rootfs.img \
+                --output ${boot_dir}/initrd.img || { ERROR "gen initrd failed"; exit 2; }
+            LOG "gen initrd done."
+        else
+            ERROR "initrd.img missing and rootfs.img absent; run build_rootfs.sh first (host dracut would build an unusable x86 initramfs)"
+            exit 2
+        fi
 
         LOG "gen extlinux config for $dtb_name"
         if [ "${platform}" == "rockchip" ];then
@@ -280,11 +337,16 @@ mk_boot() {
             exit 2
         fi
 
-        if [ "x${bootmode}" == "xextlinux" ]; then
+        if [ "x${bootmode}" == "xextlinux" ] || [ "x${bootmode}" == "xextboot" ]; then
             mkdir -p ${boot_dir}/extlinux
             cp ${cur_dir}/configs/common/extlinux.conf ${boot_dir}/extlinux
             sed -i "s|BOOTARGS|${bootargs}|g" ${boot_dir}/extlinux/extlinux.conf
-            sed -i "s|DEVICETREE|${dtb_name}.dtb|g" ${boot_dir}/extlinux/extlinux.conf
+            if [ "x${bootmode}" == "xextboot" ]; then
+                # 兜底路径的 fdt 指向 dtb/ 子目录，与 extboot 布局一致
+                sed -i "s|DEVICETREE|dtb/${dtb_name}.dtb|g" ${boot_dir}/extlinux/extlinux.conf
+            else
+                sed -i "s|DEVICETREE|${dtb_name}.dtb|g" ${boot_dir}/extlinux/extlinux.conf
+            fi
             LOG "gen extlinux config done."
         elif [ "x${bootmode}" == "xgrub" ]; then
             echo ${bootargs} \
@@ -295,15 +357,28 @@ mk_boot() {
             exit 2
         fi
         
+        if [ "x${bootmode}" == "xextboot" ]; then
+            mk_extboot
+        fi
+
     fi
-    dd if=/dev/zero of=${workdir}/boot.img bs=1M count=${boot_size} status=progress
-    mkfs.vfat -n boot ${workdir}/boot.img
-    if [ -d ${workdir}/boot_emmc ];then rm -rf ${workdir}/boot_emmc; fi
-    mkdir ${workdir}/boot_emmc
-    mount ${workdir}/boot.img ${workdir}/boot_emmc/
-    cp -r ${boot_dir}/* ${workdir}/boot_emmc/
-    umount ${workdir}/boot.img
-    rmdir ${workdir}/boot_emmc
+
+    if [ "x${bootmode}" == "xextboot" ] && [ "x${board}" != "xraspberrypi" ]; then
+        # ext2 + mkfs -d 直接灌注，保留符号链接/权限，免 mount
+        LOG "pack extboot image (ext2, ${boot_size}MiB)..."
+        rm -f ${workdir}/boot.img
+        truncate -s ${boot_size}M ${workdir}/boot.img
+        mkfs.ext2 -F -L boot -d ${extboot_dir} ${workdir}/boot.img >/dev/null
+    else
+        dd if=/dev/zero of=${workdir}/boot.img bs=1M count=${boot_size} status=progress
+        mkfs.vfat -n boot ${workdir}/boot.img
+        if [ -d ${workdir}/boot_emmc ];then rm -rf ${workdir}/boot_emmc; fi
+        mkdir ${workdir}/boot_emmc
+        mount ${workdir}/boot.img ${workdir}/boot_emmc/
+        cp -r ${boot_dir}/* ${workdir}/boot_emmc/
+        umount ${workdir}/boot.img
+        rmdir ${workdir}/boot_emmc
+    fi
 
     if [ -f ${workdir}/boot.img ]; then
         LOG "make boot image done."

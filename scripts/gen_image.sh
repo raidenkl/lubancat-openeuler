@@ -29,6 +29,10 @@ default_param() {
     nonfree_bin_dir=${cur_dir}/bin
     rootfs_dir=${workdir}/rootfs
     boot_dir=${workdir}/boot
+    boot_fs=${boot_fs:-ext2}
+    # 固定 rootfs UUID：避免每次重建镜像都换 UUID，导致必须整盘重烧；
+    # 也让 extlinux/uEnv/grub 里的 root= 在多次构建间保持稳定。板型可用同名变量覆盖。
+    rootfs_uuid=${rootfs_uuid:-6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01}
     uboot_dir=${workdir}/u-boot
     root_mnt=${workdir}/root_tmp
     boot_mnt=${workdir}/root_tmp/boot
@@ -155,9 +159,13 @@ make_img(){
     fi
     section1_end=$((${section1_start}+(${boot_size}*2048)-1))
 
-    parted ${img_file} mklabel ${part_table} mkpart primary fat32 ${section1_start}s ${section1_end}s
+    if [ "x${boot_fs}" == "xext2" ]; then
+        parted ${img_file} -s mklabel ${part_table} mkpart boot ext2 ${section1_start}s ${section1_end}s
+    else
+        parted ${img_file} -s mklabel ${part_table} mkpart boot fat32 ${section1_start}s ${section1_end}s
+    fi
     parted ${img_file} -s set 1 boot on
-    parted ${img_file} mkpart primary ext4 $(($section1_end+1))s 100%
+    parted ${img_file} -s mkpart rootfs ext4 $(($section1_end+1))s 100%
 
     device=`losetup -f --show -P ${img_file}`
     LOG "after losetup: ${device}"
@@ -171,8 +179,12 @@ make_img(){
     rootp=/dev/mapper/${loopX}p2
     LOG "make image partitions done."
     
-    mkfs.vfat -n boot ${bootp}
-    mkfs.ext4 -L rootfs ${rootp}
+    if [ "x${boot_fs}" == "xext2" ]; then
+        mkfs.ext2 -F -L boot ${bootp}
+    else
+        mkfs.vfat -n boot ${bootp}
+    fi
+    mkfs.ext4 -L rootfs -U ${rootfs_uuid} ${rootp}
     LOG "make filesystems done."
 
     if [ -d ${rootfs_dir} ];then rm -rf ${rootfs_dir}; fi
@@ -196,8 +208,13 @@ make_img(){
     fi
 
     if [ ! -d ${boot_mnt} ];then mkdir ${boot_mnt}; fi
-    mount -t vfat -o uid=root,gid=root,umask=0000 ${bootp} ${boot_mnt}
-    cp -rfp ${boot_dir}/* ${boot_mnt} || LOG "${boot_dir} is empty."
+    if [ "x${boot_fs}" == "xext2" ]; then
+        mount -t ext2 ${bootp} ${boot_mnt}
+        [ -d ${boot_dir} ] && cp -a ${boot_dir}/. ${boot_mnt}/ || LOG "${boot_dir} is empty."
+    else
+        mount -t vfat -o uid=root,gid=root,umask=0000 ${bootp} ${boot_mnt}
+        cp -rfp ${boot_dir}/* ${boot_mnt} || LOG "${boot_dir} is empty."
+    fi
 
     line=$(blkid | grep $rootp)
     if [ "x${board}" == "xraspberrypi" ]; then
@@ -214,8 +231,12 @@ make_img(){
         uuid=${line#*UUID=\"}
         uuid=${uuid%%\"*}
 
-        if [ "x${bootmode}" == "xextlinux" ]; then
+        if [ "x${bootmode}" == "xextlinux" ] || [ "x${bootmode}" == "xextboot" ]; then
             sed -i "s|UUID=614e0000-0000-4b53-8000-1d28000054a9|UUID=${uuid}|g" ${boot_mnt}/extlinux/extlinux.conf
+            # extboot: uEnv 的 cmdline 使用同一占位 UUID，一并替换成真实 rootfs UUID
+            if [ -d ${boot_mnt}/uEnv ]; then
+                find ${boot_mnt}/uEnv -name '*.txt' -exec sed -i "s|614e0000-0000-4b53-8000-1d28000054a9|${uuid}|g" {} +
+            fi
         elif [ "x${bootmode}" == "xgrub" ]; then
             efi_line=$(blkid | grep $bootp)
             efi_uuid=${efi_line#*UUID=\"}

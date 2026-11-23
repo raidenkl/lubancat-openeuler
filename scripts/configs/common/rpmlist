@@ -21,3 +21,13 @@ ntp
 bc
 systemd-timesyncd
 openEuler-repos
+sudo
+ukui-desktop-environment
+lightdm
+mesa-demos
+tar
+netpbm
+xorg-x11-apps
+iw
+wireless-regdb
+NetworkManager-wifi

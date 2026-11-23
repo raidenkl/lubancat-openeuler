@@ -318,7 +318,7 @@ build_rootfs() {
     LOG "Set NTP and auto expand rootfs done."
 
     echo "LABEL=rootfs  / ext4    defaults,noatime 0 0" > ${rootfs_dir}/etc/fstab
-    echo "LABEL=boot  /boot vfat    defaults,noatime 0 0" >> ${rootfs_dir}/etc/fstab
+    echo "LABEL=boot  /boot ext2    defaults,noatime 0 2" >> ${rootfs_dir}/etc/fstab
     LOG "Set fstab done."
 
     POST_BOARD_OVERLAY
