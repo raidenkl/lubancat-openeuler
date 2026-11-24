@@ -1,0 +1,17 @@
+[Unit]
+Description=Grow root filesystem to partition size
+Documentation=https://github.com/raidenkl/lubancat-openeuler/blob/main/docs/release.md
+# 只扩文件系统，不改分区表（分区由加载器按 parameter.txt 的 rootfs:grow 铺满）
+After=local-fs.target
+# 若底座 extend-root.sh 被启用（sysv-generator 生成的单元名），排在它之后
+After=extend-root.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/lubancat/growfs-rootfs.sh
+# 失败不阻断启动，下次开机会再试一次
+SuccessExitStatus=0
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
