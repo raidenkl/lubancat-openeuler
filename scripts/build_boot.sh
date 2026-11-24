@@ -126,9 +126,6 @@ clone_and_check_kernel_source() {
             last_default_defconfig=$(cat ${workdir}/.param_last | grep default_defconfig)
             last_default_defconfig=${last_default_defconfig:18}
 
-            last_dtb_name=$(cat ${workdir}/.param_last | grep dtb_name)
-            last_dtb_name=${last_dtb_name:9}
-            
             last_platform_name=$(cat ${workdir}/.param_last | grep platform)
             last_platform_name=${last_platform_name:9}
 
@@ -141,9 +138,10 @@ clone_and_check_kernel_source() {
             local_kernel_version=$(git rev-parse @)
             popd
 
+            # dtb_name 变化不需要重编内核：mk_extboot 每次都会从内核树重新拷 dtb。
+            # 留在判据里会退化成"换块板就 rm -rf kernel 全量重编"（25-30 min）。
             if [[ ${last_branch} != ${branch} || \
             ${last_default_defconfig} != ${default_defconfig} || \
-            ${last_dtb_name} != ${dtb_name} || \
             ${last_kernel_url} != ${kernel_url} || \
             ${lastest_kernel_version} != ${local_kernel_version} ]]; then
                 if [ -d ${workdir}/kernel ];then rm -rf ${workdir}/kernel; fi

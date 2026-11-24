@@ -37,7 +37,8 @@ default_param()
     board=lubancat-5
     nonfree_bin_dir=${cur_dir}/bin
     # 上游已跟踪的 Rockchip 打包工具（afptool / rkImageMaker）
-    rk_tool_dir=${cur_dir}/bin/tools/rockchip/rk3588-pack
+    # afptool / rkImageMaker 与 SoC 无关，各板共用；只保留覆盖位
+    rk_tool_dir=${rk_tool_dir:-${cur_dir}/bin/tools/rockchip/rk3588-pack}
     # rkbin：SBC-sig 与 rkbin 同级（src/SBC-sig、src/rkbin）
     rkbin_dir=${rkbin_dir:-${cur_dir}/../../rkbin}
     # uboot 分区：0x2000 扇区 = 4 MiB，足够放 983K 的 u-boot.itb
@@ -75,13 +76,25 @@ ERROR()
 cur_dir=$(cd "$(dirname "$0")"; pwd)
 default_param
 
-# board.conf 可覆盖 boot_size 等参数
+parseargs "$@"
+
+# board.conf 可覆盖 boot_size / soc_name 等参数。
+# 必须在 parseargs 之后加载：否则 -b 指定的板卡不会生效（会用 default_param 的默认板卡）。
 [ -f ${cur_dir}/boards/${board}.conf ] || { echo "no such board: ${board}"; exit 1; }
 source ${cur_dir}/boards/${board}.conf
-parseargs "$@"
+[ -n "${soc_name:-}" ] || { echo "conf 未设置 soc_name: ${board}"; exit 1; }
 
 mkdir -p ${log_dir} ${outputdir} ${rkpack_dir}/Image
 boot_size=${boot_size:-256}
+
+# ---------- SoC 派生（loader / parameter / 打包共用）----------
+# soc_name 是 uEnv 目录名，可能是家族名（rk356x），而 loader 文件名是 rk3566_spl_loader_*.bin
+loader_prefix=${loader_prefix:-${soc_name}}
+[ "${loader_prefix}" = rk356x ] && loader_prefix=rk3566
+rk_loader_ini=${rk_loader_ini:-${loader_prefix^^}MINIALL.ini}
+param_machine=${param_machine:-${loader_prefix^^}}
+xz_threads=${xz_threads:-8}
+LOG "soc: soc_name=${soc_name} loader_prefix=${loader_prefix} loader_ini=${rk_loader_ini}"
 
 # ---------- 0. 前置检查 ----------
 for f in ${workdir}/boot.img ${workdir}/rootfs.img; do
@@ -99,17 +112,28 @@ for c in ${workdir}/u-boot/MiniLoaderAll.bin \
     [ -s "$c" ] && { loader=$c; break; }
 done
 if [ -z "${loader}" ]; then
-    for c in ${workdir}/u-boot/rk3588_spl_loader_*.bin \
-             ${nonfree_bin_dir}/u-boot/${board}/rk3588_spl_loader_*.bin; do
+    for c in ${workdir}/u-boot/${loader_prefix}_spl_loader_*.bin \
+             ${nonfree_bin_dir}/u-boot/${board}/${loader_prefix}_spl_loader_*.bin; do
         [ -s "$c" ] && { loader=$c; break; }
     done
 fi
 if [ -z "${loader}" ] && [ -x "${rkbin_dir}/tools/boot_merger" ]; then
     LOG "loader not found, generate with boot_merger..."
-    ( cd "${rkbin_dir}" && ./tools/boot_merger pack RKBOOT/RK3588MINIALL.ini ) >/dev/null 2>&1 || true
-    for c in ${rkbin_dir}/rk3588_spl_loader_*.bin; do [ -s "$c" ] && { loader=$c; break; }; done
+    ( cd "${rkbin_dir}" && ./tools/boot_merger pack "RKBOOT/${rk_loader_ini}" ) >/dev/null 2>&1 || true
+    for c in ${rkbin_dir}/${loader_prefix}_spl_loader_*.bin; do [ -s "$c" ] && { loader=$c; break; }; done
 fi
-[ -n "${loader}" ] || { ERROR "no loader (MiniLoaderAll.bin / rk3588_spl_loader_*.bin)"; exit 2; }
+[ -n "${loader}" ] || { ERROR "no loader (MiniLoaderAll.bin / ${loader_prefix}_spl_loader_*.bin)"; exit 2; }
+
+# rkImageMaker 的 -RKxxxx：优先 conf 显式；其次从 loader 头读（offset 21 起 4 字节，小端）；
+# 最后退回 loader_prefix。Cat-4 虽为 RK3588S，loader 头仍是 3588，从头部推导天然正确。
+if [ -z "${rkimage_chip:-}" ]; then
+    rkimage_chip=$(dd if="${loader}" bs=1 skip=21 count=4 2>/dev/null | rev)
+    case "${rkimage_chip}" in
+        [0-9][0-9][0-9][0-9]) : ;;
+        *) rkimage_chip=$(printf '%s' "${loader_prefix#rk}" | tr '[:lower:]' '[:upper:]') ;;
+    esac
+fi
+LOG "rkimage_chip=${rkimage_chip} (loader=$(basename "${loader}"))"
 
 # ---------- 2. uboot.img（FIT：atf + optee + uboot）----------
 uboot_img=${workdir}/u-boot/uboot.img
@@ -132,9 +156,9 @@ rootfs_off=$((boot_off + boot_num))
 
 cat > ${rkpack_dir}/Image/parameter.txt <<EOF
 FIRMWARE_VER: 8.1
-MACHINE_MODEL: RK3588
+MACHINE_MODEL: ${param_machine}
 MACHINE_ID: 007
-MANUFACTURER: RK3588
+MANUFACTURER: ${param_machine}
 MAGIC: 0x5041524B
 ATAG: 0x00200800
 MACHINE: 0xffffffff
@@ -232,7 +256,7 @@ ${rk_tool_dir}/afptool -pack . Image/update.img >/dev/null 2>&1 || {
     ERROR "afptool pack failed"; exit 2; }
 
 LOG "wrap loader (rkImageMaker)..."
-${rk_tool_dir}/rkImageMaker -RK3588 Image/MiniLoaderAll.bin Image/update.img \
+${rk_tool_dir}/rkImageMaker -RK${rkimage_chip} Image/MiniLoaderAll.bin Image/update.img \
     ${outputdir}/${name}.img -os_type:androidos >/dev/null 2>&1 || {
     ERROR "rkImageMaker failed"; exit 2; }
 
@@ -268,7 +292,7 @@ rm -rf ${workdir}/rkverify ${workdir}/rkverify2
 
 # ---------- 7. 压缩与输出 ----------
 LOG "xz compress..."
-( cd ${outputdir} && xz -T 8 -f ${name}.img )
+( cd ${outputdir} && xz -T ${xz_threads} -f ${name}.img )
 ( cd ${outputdir} && sha256sum ${name}.img.xz > ${name}.img.xz.sha256sum )
 
 cat <<EOF
