@@ -1,0 +1,26 @@
+# LubanCat 板卡构建矩阵 —— 新增一块板卡只需要在这里加一行
+#
+# 列（TAB 分隔，共 6 列）：
+#   1 family        SoC 家族：rk356x | rk3576 | rk3588（菜单第一层按此分组）
+#   2 board         板卡名，同时也是 boards/<board>.conf 的文件名
+#   3 kern_defconfig 内核 defconfig（rk356x 覆盖 3566+3568，rk3588 覆盖 3588+3588S）
+#   4 kern_branch   内核分支（build.sh 的 -b 参数）
+#   5 status        verified | buildable | blocked:<缺什么，逗号分隔>
+#   6 note          备注（可为空，但必须保留第 6 个 TAB）
+#
+# 以下字段一律以 boards/<board>.conf 为准，不在此重复（重复必然漂移）：
+#   dtb_name / soc_name / boot_size / local_uboot_dir / ubootconfig
+#   extboot_generic_dtb / extboot_generic_uenv
+#
+# 易错点：
+#   - Cat-0/1/2 的 soc_name 必须是 rk356x（uEnv/ 下没有 rk3566、rk3568 目录）
+#   - Cat-4 的 soc_name 必须是 rk3588（uEnv/ 下没有 rk3588s 目录）
+#   - Cat-0/1/2 的 ubootconfig/loader_prefix 用 rk3566（loader 文件是 rk3566_spl_loader_*.bin）
+#
+# family	board	kern_defconfig	kern_branch	status	note
+rk3588	lubancat-5	lubancat_linux_rk3588_defconfig	lubancat-5	verified	alpha10 实机通过（ukui + headless 待补）
+rk3588	lubancat-4	lubancat_linux_rk3588_defconfig	lubancat-5	blocked:conf,uboot	RK3588S；soc_name 写 rk3588，dtb 用 rk3588s-lubancat-4
+rk3576	lubancat-3	lubancat_linux_rk3576_defconfig	lubancat-3	blocked:conf,uboot	boot_size 建议 512；rk3576 用 Mali-G52
+rk356x	lubancat-2	lubancat_linux_rk356x_defconfig	lubancat-2	blocked:conf,uboot	RK3568；soc_name 写 rk356x
+rk356x	lubancat-1	lubancat_linux_rk356x_defconfig	lubancat-1	blocked:conf,uboot	RK3566；ubootconfig 用 rk3566.config（fragment）
+rk356x	lubancat-0	lubancat_linux_rk356x_defconfig	lubancat-0	blocked:conf,uboot	需实机标定 SARADC 板型映射

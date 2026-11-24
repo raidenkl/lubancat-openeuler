@@ -57,8 +57,16 @@ jobs:
           done
           exit $fail
 
-      - name: shellcheck（仅新增脚本，warning 级）
+      - name: shellcheck（本项目新增脚本，必须零警告）
         run: |
           sudo apt-get update -qq && sudo apt-get install -y shellcheck
-          # 上游脚本历史风格较旧，只检查本项目新增的文件
+          shellcheck -S warning tools/build-image.sh tests/test-build-image.sh
+
+      - name: shellcheck（上游风格脚本，仅参考）
+        run: |
+          # 上游脚本历史风格较旧，不阻塞合并；新增脚本见上一步
           shellcheck -S warning scripts/fetch-sources.sh scripts/gen_rk_update.sh scripts/mk_initrd.sh || true
+
+      - name: 板卡矩阵与入口脚本一致性
+        run: |
+          bash tests/test-build-image.sh
