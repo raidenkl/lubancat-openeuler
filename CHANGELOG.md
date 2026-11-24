@@ -5,13 +5,35 @@
 
 镜像命名与 tag 逐字符对应：`<board>_openEuler-24.03-LTS_aarch64_<tag>.img.xz`。
 
-## [Unreleased]
+## [Unreleased]（alpha7，未打 tag）
+
+### Fixed
+- **P0-1 系统目录属主污染**：libmali tar 改为 root 属主 + 无目录条目重打包；
+  解包加 `--no-same-owner`；overlay 末尾对 `/ /etc /usr /usr/lib
+  /usr/lib/firmware /usr/lib64 /etc/OpenCL /etc/ld.so.conf.d` 做属主兜底并断言
+- **P0-2 桌面用户加入 video 组**（/dev/mali0、/dev/rga、/dev/mpp_service 可用）
+- **P0-3 首启唯一性**：machine-id 截断、SSH 主机密钥删除（sshd-keygen@ 实例
+  显式 enable）、新增 lubancat-firstboot.service 生成唯一主机名
+- **P0-4 根分区自动扩容**：lubancat-resize.service（parted resizepart +
+  在线 resize2fs，换大卡后自动用满）
+- **P0-6 镜像卫生**：dnf 缓存 / /tmp 清理、补 /var/log/lastlog、ldconfig
+
+### Changed
+- rpmlist 增加 v4l-utils / i2c-tools / usbutils / gstreamer1-plugins-bad-free
+- boards/lubancat-5.conf 默认口令参数化（LUBANCAT_DEFAULT_PASS / LUBANCAT_SALT）
+
+### Removed
+- 音频 workaround（asound.conf default→pulse）：已复原，音频修复另行处理
+  （根因见下方 Known Issues）
 
 ### Planned
 - LubanCat-4（RK3588S）板级支持：`gen_rk_update.sh` 参数化、`soc_name` 拆为 family/model
 - LubanCat-3（RK3576）：新增 rk3576 内核与 u-boot 构建
 - LubanCat-2 / 1（RK3568 / RK3566）：共用 rk356x 内核，补 Mali-G52 libmali
 - LubanCat-0：实机标定 SARADC 板型映射
+- **音频修复**：PL330 DMA 微码缓冲问题（见 v0.6.0-alpha6 Known Issues 最后一条），
+  需在 DTS 的 dma-controller 节点加 `arm,pl330-mcbufsz-bytes = <4096>`
+  （pl330.c 仅支持设备树传入，cmdline 参数无效），影响全系 SoC 的音频 DMA
 
 ## [v0.6.0-alpha6] - 2026-11-23
 
@@ -52,8 +74,14 @@
 ### Known Issues
 - 摄像头画面上下颠倒（sensor 安装方向），需取流端 rotate 或改 DTS
 - HDMI 音频无 ELD 上报（当前显示器不含音频 sink）
-- `/`、`/etc`、`/usr` 曾被 libmali tar 的目录条目改成 uid 1000 + 775（提权风险），
-  **后续版本修复前不要用于生产**
+- `/`、`/etc`、`/usr`、`/usr/lib` 曾被 libmali tar 的目录条目改成 uid 1000 + 775
+  （提权风险）——**alpha7 已修复**，alpha6 及更早镜像不要用于生产
+- **音频不可用（根因已定位）**：PL330 DMA 微码缓冲默认 256B，音频描述符（258B）
+  被 `dma-pl330 fill_queue:2267 Bad Desc` 拒绝，I2S 中断恒为 0，任何播放器
+  （含 UKUI 登录音 aplay）永久阻塞在 snd_pcm_write。修复需在 DTS 的
+  `dma-controller@fea30000`（dmac1）节点加 `arm,pl330-mcbufsz-bytes = <4096>`；
+  pl330.c 只从设备树读取该值（cmdline 参数无效），且上限为 PAGE_SIZE。
+  该修复影响全系 SoC 的音频 DMA，待评估后统一合入
 - 无 swap/zram；CPU governor 固定 performance，空载也满频
 
 ## 历史构建（工程内部编号，未打 tag）
