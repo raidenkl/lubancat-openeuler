@@ -1,0 +1,42 @@
+# alpha10 构建记录
+
+- **镜像**：`openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha10.img.xz`
+- **大小**：2,093,642,592 B（1.950 GiB）
+- **sha256**：`755996a5014d8aff2ee4890308a21dca22cf2ebf0a9a7fb5e342a0348c5eff63`
+- **rootfs UUID**：`6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01`
+- **rootfs 文件系统**：ext4，1,973,504 块（7.53 GiB），首启扩到分区大小
+- **内核**：6.1.99-rk3588，299 个 `.ko`
+
+## 相对 alpha9 的差异（桌面体验）
+
+| 项 | alpha9 | alpha10 |
+|---|---|---|
+| 鼠标指针 | 移到任务栏后消失 | `Option "SWcursor" "on"`，软件光标 |
+| 屏幕键盘 | 无 | `onboard` + `onboard-data`，自启隐藏、触摸弹出 |
+
+## 新增文件
+
+- `/etc/X11/xorg.conf.d/20-swcursor.conf`
+- `/etc/xdg/autostart/onboard-autostart.desktop`
+- `/etc/dconf/db/local.d/00-onboard`（`dconf update` 已在 overlay 阶段执行，
+  `/etc/dconf/db/local` 已重编译）
+
+## 问题定位依据
+
+**鼠标指针消失**：XFixes 读到的光标仍是 24x24 `default`、254 个不透明像素 ——
+X 侧状态正常，是"没画出来"。`/var/log/Xorg.0.log` 显示
+`Refusing to try glamor on llvmpipe` + `glamor initialization failed` +
+`ShadowFB: enabled NO`，即 X 直接渲染到扫描缓冲区，光标走 rockchip-drm 的
+VOP cursor plane；该 plane 在 DSI 面板上重绘一次即丢失。改用软件光标后由 X
+自己合成，不再依赖该 plane。
+
+**屏幕键盘**：`onboard 1.4.1` 在 EPOL 源中，X11 下工作正常；`Show`/`Hide`
+经 DBus 验证可正常唤出（800x200 停靠 y=1034）与收起。auto-show 依赖 AT-SPI
+（`at-spi2-core`/`at-spi2-atk` 已装），触摸文本输入框时弹出。
+
+## 待实机验收
+
+1. 鼠标反复移到任务栏/沿底边滑动，指针不再消失
+2. 手指点搜索框或终端等输入控件，键盘自动弹出；按物理键盘自动收起
+3. 开始菜单搜 "Onboard" 可手动打开
+4. `df -h /` 为整卡容量、`hostnamectl` 为 `LubanCat-5-xxxxxx`（alpha9 已验证项回归）
