@@ -1,0 +1,28 @@
+image=openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha7
+built_at=2026-11-24T00:35Z..00:46Z
+layout=vendor
+base=alpha6 rootfs.img + P0 修复 overlay（属主/video 组/首启唯一性/自动扩容/卫生）
+image_path=src/SBC-sig/scripts/build/2026-11-24/openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha7.img.xz
+image_xz_bytes=2070095112
+image_xz_sha256=6a8467d3ddc1c9e7818438fa70d8e5e7b19ab5f41eec58df63cd5b11333d84da
+rootfs_uuid=6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01
+kernel_modules=299
+boot_size_mib=256
+
+# ---- P0 验收（除音频外，26 项全过，脚本 build/check_a7.sh）----
+p0_1_ownership=PASS    # / /etc /usr /usr/lib /usr/lib/firmware /usr/lib64 /usr/lib64/mali 全 root:root 755；全库无 uid1000 污染目录
+p0_2_video_group=PASS  # /etc/group 的 video 行含 lubancat
+p0_3_unique_firstboot=PASS  # machine-id 截断、ssh_host_* 已删、sshd-keygen@ 三实例 enable、lubancat-firstboot 已挂 Wants
+p0_4_auto_resize=PASS  # lubancat-resize.service 已 enable（parted resizepart + resize2fs）
+p0_6_image_hygiene=PASS     # dnf 缓存 4.0K、/tmp 0 项、存在 /var/log/lastlog
+g2_rpmlist=PASS        # v4l-utils / i2c-tools / usbutils / gstreamer1-plugins-bad-free 均已安装
+uuid_three_way=PASS    # uEnv / extlinux / rootfs 均为 6f1c2a10-…
+kernel_modules_in_image=PASS  # 打包层 rootfs 299 个 .ko，/lib→usr/lib 软链完好
+
+# ---- 音频：本轮按要求复原，未纳入验收 ----
+audio=REVERTED
+audio_root_cause=dma-pl330 fea30000 fill_queue Bad Desc（mcbufsz 默认 256B < 音频描述符 258B），I2S 中断恒为 0，aplay 永久阻塞
+audio_fix_hint=DTS dma-controller@fea30000 加 arm,pl330-mcbufsz-bytes=<4096>（pl330.c 只读设备树，cmdline 无效，上限 PAGE_SIZE）
+
+# ---- 未验证 ----
+not_verified=fresh-flash 首启行为（firstboot/resize 需实机刷入后确认）、音频、摄像头画质
