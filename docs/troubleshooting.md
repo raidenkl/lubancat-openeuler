@@ -102,3 +102,56 @@ alpha6 的首启扩容就是它做的。
 - 内核模块与固定 UUID 只存在于 `rkpack/Image/rootfs.img`（gen 加工后的 staging 副本），
   工作区的 `rootfs.img` 永远没有模块、UUID 也是随机的；uEnv 占位 UUID 只替换
   staging 的 `boot.img`。校验时不要查错对象。
+
+## 鼠标指针移到任务栏后消失
+
+**现象**：指针进入底部任务栏后不可见，移开也不恢复，重启（或重登）才复原。
+
+**判定**：X 侧光标状态是好的。用 XFixes 读 `XFixesGetCursorImage`，指针在任务栏上时
+仍是 24x24、name=`default`、254 个不透明像素 —— 说明不是"被设成空白"，而是
+"没有被画出来"。同时 `xwininfo` 显示面板窗口正常、`blkid` 之类无关。
+
+**根因**：本平台 X 走 modesetting 驱动，glamor 初始化失败
+（`modeset(0): Refusing to try glamor on llvmpipe`），`ShadowFB: enabled NO`，
+X 直接渲染到扫描缓冲区；光标交给 rockchip-drm 的 VOP cursor plane 绘制，
+而该 plane 在 DSI 面板上不稳定 —— 面板重绘一次就会丢，之后不再更新。
+
+**修法**：强制软件光标，由 X 把它画进扫描缓冲区：
+
+```sh
+cat /etc/X11/xorg.conf.d/20-swcursor.conf
+# Section "Device"
+#     Identifier "Rockchip"
+#     Driver     "modesetting"
+#     Option     "SWcursor" "on"
+# EndSection
+```
+
+生效验证（重启 lightdm 后）：
+
+```sh
+grep -i swcursor /var/log/Xorg.0.log
+# (**) modeset(0): Option "SWcursor" "on"
+```
+
+副作用：光标由 CPU 合成，理论上多一点点延迟；在本平台可忽略。
+
+## 屏幕键盘（onboard）
+
+镜像预装 `onboard` + `onboard-data`，由
+`/etc/xdg/autostart/onboard-autostart.desktop` 自启，默认值通过 dconf 系统库
+`/etc/dconf/db/local.d/00-onboard` 下发：
+
+| 键 | 值 | 含义 |
+|---|---|---|
+| `org.onboard.auto-show enabled` | `true` | 开机隐藏，触摸到文本输入框才弹出 |
+| `org.onboard.auto-show hide-on-key-press` | `true` | 按物理键盘自动收起 |
+| `org.onboard show-status-icon` | `true` | 托盘留图标 |
+| `org.onboard layout` | `Compact` | 紧凑布局，适合 800x1280 竖屏 |
+| `org.onboard.window docking-enabled` | `true` | 停靠在屏幕底部、自动让出工作区 |
+
+手动打开：开始菜单搜 "Onboard"（中文名"屏幕键盘"），或终端 `onboard &`。
+
+改成常显：`gsettings set org.onboard.auto-show enabled false` 后重新登录。
+
+改完 dconf 系统库需要 `dconf update`（构建时 overlay 阶段已执行）。

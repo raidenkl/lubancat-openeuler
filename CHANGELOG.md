@@ -5,7 +5,7 @@
 
 镜像命名与 tag 逐字符对应：`<board>_openEuler-24.03-LTS_aarch64_<tag>.img.xz`。
 
-## [Unreleased]（alpha9，未打 tag）
+## [Unreleased]（alpha10，未打 tag）
 
 ### Fixed
 - **P0-1 系统目录属主污染**：libmali tar 改为 root 属主 + 无目录条目重打包；
@@ -32,6 +32,19 @@
 
   根分区挂不上，只能进 dracut emergency。已删除该服务并改为只 `resize2fs`；
   串口恢复步骤见 `docs/troubleshooting.md`。
+
+
+### Added
+- **屏幕键盘 onboard**（含 onboard-data）：自启但默认隐藏，触摸文本输入时弹出、
+  按物理键盘收起、托盘留图标；默认值经 dconf 系统库
+  `/etc/dconf/db/local.d/00-onboard` 下发，布局 `Compact` 适配 800x1280 竖屏
+
+### Fixed（alpha10）
+- **鼠标指针移到任务栏后消失**：X 走 modesetting 且 glamor 初始化失败
+  （`Refusing to try glamor on llvmpipe`）、无 ShadowFB，光标依赖 rockchip-drm
+  的 VOP cursor plane，DSI 面板重绘一次后丢失且不再更新。改为软件光标
+  （`/etc/X11/xorg.conf.d/20-swcursor.conf`，`Option "SWcursor" "on"`），
+  由 X 画进扫描缓冲区。判定依据与验证方法见 `docs/troubleshooting.md`
 
 
 ### Changed

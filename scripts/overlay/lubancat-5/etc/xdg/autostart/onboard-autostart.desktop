@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Onboard
+Name[zh_CN]=屏幕键盘
+Comment=Flexible on-screen keyboard
+Comment[zh_CN]=屏幕虚拟键盘，触摸输入时自动弹出
+Exec=onboard --not-show-in=GNOME,Unity
+Icon=onboard
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Phase=Panel

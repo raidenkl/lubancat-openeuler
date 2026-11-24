@@ -1,0 +1,15 @@
+# 屏幕键盘（onboard）默认值：开机自启但保持隐藏，
+# 触摸到文本输入框时自动弹出，按下物理键盘后自动收起。
+# 手动打开：开始菜单搜索 "Onboard"/"屏幕键盘"，或点系统托盘图标。
+[org/onboard/auto-show]
+enabled=true
+hide-on-key-press=true
+
+[org/onboard]
+show-status-icon=true
+layout='Compact'
+
+[org/onboard/window]
+docking-enabled=true
+docking-edge='bottom'
+docking-shrink-workarea=true
