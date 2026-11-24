@@ -218,16 +218,24 @@ if [[ $(cat ${workdir}/.done | grep bootimg) != "bootimg" ]];then
     bash ${cur_dir}/build_boot.sh
 fi
 
+# 容器内以 root 构建时没有 sudo（openeuler 镜像未装）；非 root 才需要
+SUDO=""
+if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo"; fi
+
 if [[ $(cat ${workdir}/.done | grep rootfs) != "rootfs" ]];then
-    if [[ "${host_arch}" == "x86_64" && "${arch}" == "arm64" ]];then
+    # 容器内通常已预装 qemu-aarch64-static，此时不需要再装：
+    # 下面硬编码的是 aarch64 架构的 rpm，在 x86_64 宿主上会报
+    # "does not have a compatible architecture"。
+    if [[ "${host_arch}" == "x86_64" && "${arch}" == "arm64" ]] && \
+       ! command -v qemu-aarch64-static >/dev/null 2>&1; then
         LOG "You are running this script on a ${host_arch} mechine, installing qemu-user-static...."
         HOST_VERSION=$(cat /etc/os-release | grep VERSION_ID)
         HOST_VERSION=${HOST_VERSION:12:-1}  #25.09
         if [[ "${HOST_VERSION}" > "25.09" ]] || [[ "${HOST_VERSION}" == "25.09" ]]; then
-            sudo dnf install qemu-user-static qemu-user-binfmt -y
+            ${SUDO} dnf install qemu-user-static qemu-user-binfmt -y
         elif [[ "${HOST_VERSION}" == "22.03" ]] || [[ "${HOST_VERSION}" == "24.03" ]]; then
-            sudo dnf install https://dl-cdn.openeuler.openatom.cn/openEuler-24.03-LTS-SP3/everything/aarch64/Packages/qemu-user-static-8.2.0-58.oe2403sp3.aarch64.rpm -y
-            sudo dnf install https://dl-cdn.openeuler.openatom.cn/openEuler-24.03-LTS-SP3/everything/aarch64/Packages/qemu-user-binfmt-8.2.0-58.oe2403sp3.aarch64.rpm -y
+            ${SUDO} dnf install https://dl-cdn.openeuler.openatom.cn/openEuler-24.03-LTS-SP3/everything/aarch64/Packages/qemu-user-static-8.2.0-58.oe2403sp3.aarch64.rpm -y
+            ${SUDO} dnf install https://dl-cdn.openeuler.openatom.cn/openEuler-24.03-LTS-SP3/everything/aarch64/Packages/qemu-user-binfmt-8.2.0-58.oe2403sp3.aarch64.rpm -y
         else
             ERROR "Unsupported openEuler version."
         fi

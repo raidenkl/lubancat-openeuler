@@ -28,6 +28,9 @@ SBC=$REPO/scripts
 MATRIX=$SBC/boards/matrix.tsv
 BUILD_DIR=$SBC/build
 DISTRO_TAG=openEuler-24.03-LTS-SP3
+# rootfs 的 dnf 源（build.sh 的 -r）。默认值随 DISTRO_TAG 走；
+# build.sh 自带的默认是 openEuler-20.03，不覆盖会装到 oe1 的包。
+DEFAULT_REPO_FILE="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/${DISTRO_TAG}/generic.repo"
 
 # ---------- 输出 ----------
 die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 2; }
@@ -50,6 +53,7 @@ usage() {
   -n, --name <name>              镜像名（默认自动生成）
   --kernel-branch <branch>       内核分支（默认取 matrix 的 kern_branch）
   --kernel-url <url|path>        内核源码位置（默认自动探测 src/kernel-bsp-6.1）
+  --repo-file <url>              rootfs 的 dnf 源（默认 openEuler-24.03-LTS-SP3/generic.repo）
   --jobs <N>                     并行度（默认 nproc）
   --clean <stage|all>            构建前清理（stage=rootfs.img；all=内核/rkpack/param）
 
@@ -89,6 +93,7 @@ NONINTERACTIVE=0
 VERBOSE=0
 KERNEL_BRANCH=""
 KERNEL_URL=""
+REPO_FILE=""
 
 need_arg() { [ "$#" -ge 2 ] || die "选项 $1 需要一个参数"; }
 
@@ -114,6 +119,7 @@ while [ "$#" -gt 0 ]; do
         --jobs=*)         JOBS=${1#*=}; shift ;;
         --kernel-branch)  need_arg "$@"; KERNEL_BRANCH=$2; shift 2 ;;
         --kernel-url)     need_arg "$@"; KERNEL_URL=$2; shift 2 ;;
+        --repo-file)      need_arg "$@"; REPO_FILE=$2; shift 2 ;;
         --list)           DO_LIST=1; shift ;;
         --format)         need_arg "$@"; LIST_FMT=$2; shift 2 ;;
         --dry-run)        DRY_RUN=1; shift ;;
@@ -396,6 +402,8 @@ if [ -z "$KERNEL_URL" ]; then
     done
 fi
 
+[ -n "$REPO_FILE" ] || REPO_FILE=$DEFAULT_REPO_FILE
+
 # 镜像名
 if [ -z "$NAME" ]; then
     VER=$(git -C "$REPO" describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -468,6 +476,7 @@ if [ "$VERBOSE" = 1 ]; then
     info "内核 defcfg : $M_KDEF"
     info "内核分支    : $KERNEL_BRANCH"
     info "内核源码    : ${KERNEL_URL:--（由 build.sh 自行 clone）}"
+    info "dnf 源      : $REPO_FILE"
     info "u-boot 配置 : ${UBOOT_CFG:-（空=用预编译 $LOCAL_UBOOT）}"
     info "桌面        : $DESKTOP → $SPEC"
     info "布局        : $LAYOUT"
@@ -515,12 +524,13 @@ fi
 
 # ---------- 执行 ----------
 BUILD_SH_ARGS=(--board "$BOARD" -n "$NAME" -s "$SPEC" --layout "$LAYOUT" --cores "$JOBS")
+[ -n "$REPO_FILE" ] && BUILD_SH_ARGS+=(-r "$REPO_FILE")
 [ -n "$M_KDEF" ] && BUILD_SH_ARGS+=(-c "$M_KDEF")
 [ -n "$KERNEL_BRANCH" ] && BUILD_SH_ARGS+=(-b "$KERNEL_BRANCH")
 [ -n "$KERNEL_URL" ] && BUILD_SH_ARGS+=(-k "$KERNEL_URL")
 
 stage_all() {
-    run bash "$SBC/build.sh" "${BUILD_SH_ARGS[@]}"
+    run bash "$SBC/build.sh" "${BUILD_SH_ARGS[@]}" || die "build.sh 执行失败（详见上面的日志）"
 }
 
 stage_image() {
@@ -531,7 +541,7 @@ stage_image() {
         grep -q "^board=$BOARD\$" "$BUILD_DIR/.param" || \
             die "$BUILD_DIR/.param 不是为 $BOARD 生成的（先跑 --stage all）"
     }
-    run bash "$SBC/gen_rk_update.sh" -n "$NAME" -b "$BOARD"
+    run bash "$SBC/gen_rk_update.sh" -n "$NAME" -b "$BOARD" || die "gen_rk_update.sh 执行失败"
 }
 
 stage_sub() {
@@ -541,7 +551,7 @@ stage_sub() {
         grep -q "^board=$BOARD\$" "$BUILD_DIR/.param" || \
             die "$BUILD_DIR/.param 不是为 $BOARD 生成的（先跑 --stage all）"
     }
-    run bash "$SBC/$script"
+    run bash "$SBC/$script" || die "$name 阶段失败（$script）"
     [ "$DRY_RUN" = 1 ] || info "$name 阶段完成"
 }
 

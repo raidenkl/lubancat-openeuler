@@ -201,6 +201,12 @@ make_kernel(){
     fi
 
     cp ${kernel_defconfig} .config
+    # GCC 13 对老的 Rockchip WLAN 驱动（rtl8821cu 等）会报
+    # -Werror=stringop-overread / stringop-overflow / array-bounds 误报，
+    # 配合 defconfig 里的 CONFIG_WERROR=y 会让整棵内核编不过（rk3576 全量编译实测）。
+    # 只关这几个子警告，其余 -Werror 仍然生效。
+    export KCFLAGS="${KCFLAGS:-} -Wno-error=stringop-overread -Wno-error=stringop-overflow -Wno-error=array-bounds"
+
     make ARCH=arm64 olddefconfig
     kernel_defconfig=${kernel_defconfig##*/}
     make ARCH=arm64 -j${make_cores}
@@ -450,7 +456,11 @@ fi
 
 clone_and_check_kernel_source
 
-if [[ -f ${workdir}/kernel/arch/arm64/boot/dts/${platform}/${dtb_name}.dtb && -f ${workdir}/kernel/arch/arm64/boot/Image ]];then
+# 判据必须包含 System.map：内核编译中断（例如驱动编译报错）时 Image/dtb 可能是
+# 上一轮的残留，只看这两个文件会误判成"已编好"，随后 make install 因缺 System.map 失败。
+if [[ -f ${workdir}/kernel/arch/arm64/boot/dts/${platform}/${dtb_name}.dtb \
+   && -f ${workdir}/kernel/arch/arm64/boot/Image \
+   && -f ${workdir}/kernel/System.map ]];then
     LOG "kernel is the latest"
 else
     make_kernel ${workdir}/kernel
