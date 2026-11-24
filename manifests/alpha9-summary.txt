@@ -1,0 +1,42 @@
+# alpha9 构建记录
+
+- **镜像**：`openEuler-24.03-LTS-SP3-LubanCat-5-aarch64-alpha9.img.xz`
+- **大小**：2,070,089,688 B（1.928 GiB）
+- **sha256**：`2b75aa64cee9a9864101ebc0da1d6f70bb02e9fc320f414f3ef82dff4bd4568d`
+- **构建时间**：2026-11-24 01:44（容器 UTC）
+- **rootfs UUID**：`6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01`
+- **rootfs 文件系统**：ext4，1,973,504 块（7.53 GiB），首启扩到分区大小
+- **内核**：6.1.99-rk3588，299 个 `.ko`
+- **boot 分区**：256 MiB ext2（extboot 布局）
+
+## 相对 alpha7 的唯一差异
+
+| 项 | alpha7 | alpha9 |
+|---|---|---|
+| 扩容服务 | `lubancat-resize.service`：`parted resizepart 100%` + `resize2fs` | `lubancat-growfs.service`：**只** `resize2fs` |
+| 分区表 | 被 `parted` 改到盘尾（多 1984 扇区） | 完全不动，由加载器按 `parameter.txt` 决定 |
+| 结果 | 首启后 FS 比分区大 248 块 → `bad geometry` → 无法启动 | FS 恒等于分区尺寸 |
+
+alpha8（2026-11-24 01:32，sha256 `1c4b5045…`）是"只删旧服务、未加 growfs"的中间产物，
+保留作对照；实际验证请用 alpha9。
+
+## 与底座扩容脚本的关系
+
+`/etc/rc.d/init.d/extend-root.sh`（`rc3/4/5.d/S99` 启用，one-shot）在首启时也会扩 FS：
+它判定 `PART_END < ROOT_END` 成立（加载器在盘尾留了约 992 KiB），于是 `fdisk` 重建末分区
+并 `resize2fs`，成功后自删。`fdisk` 那次重建会被加载器下次启动覆盖，属无害动作。
+
+`lubancat-growfs.service` 常驻兜底（one-shot 脚本自删后、或系统被 dd 到更大卡时仍需扩容），
+两者目标尺寸同源（都用分区边界），不会互相越界。
+
+## 未包含
+
+- 音频修复（PL330 DMA 微码缓冲，见 `CHANGELOG.md` Known Issues），本版维持 alpha6 状态
+
+## 待实机验收
+
+1. `df -h /` 应为整卡容量（约 116 GiB，而不是 7.5 GiB）
+2. `hostnamectl` 应为 `LubanCat-5-xxxxxx`（首启唯一化生效）
+3. `systemctl --failed` 为空
+4. `ssh` 可连（SSH 主机密钥首启重建成功）
+5. `/var/log/extend-root.log` 记录首启扩容结果，`/etc/rc.d/init.d/extend-root.sh` 已自删

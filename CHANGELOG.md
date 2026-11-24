@@ -5,7 +5,7 @@
 
 镜像命名与 tag 逐字符对应：`<board>_openEuler-24.03-LTS_aarch64_<tag>.img.xz`。
 
-## [Unreleased]（alpha7，未打 tag）
+## [Unreleased]（alpha9，未打 tag）
 
 ### Fixed
 - **P0-1 系统目录属主污染**：libmali tar 改为 root 属主 + 无目录条目重打包；
@@ -14,9 +14,25 @@
 - **P0-2 桌面用户加入 video 组**（/dev/mali0、/dev/rga、/dev/mpp_service 可用）
 - **P0-3 首启唯一性**：machine-id 截断、SSH 主机密钥删除（sshd-keygen@ 实例
   显式 enable）、新增 lubancat-firstboot.service 生成唯一主机名
-- **P0-4 根分区自动扩容**：lubancat-resize.service（parted resizepart +
-  在线 resize2fs，换大卡后自动用满）
+- **P0-4 根分区自动扩容**：lubancat-growfs.service 只做在线 `resize2fs`，
+  目标尺寸取自 `/sys/class/block/<part>/size`，**绝不改分区表**；不写 marker，
+  每次启动比对块数，相等即退出（幂等）
 - **P0-6 镜像卫生**：dnf 缓存 / /tmp 清理、补 /var/log/lastlog、ldconfig
+
+### Fixed（alpha7 → alpha9 回归）
+- **alpha7 装完无法启动（`bad geometry`）**：alpha7 的 `lubancat-resize.service`
+  用 `parted resizepart 100%` 把分区定义到盘尾，比加载器留出的边界多 1984 扇区
+  （992 KiB）；`resize2fs` 按这个尺寸扩完后，下次启动加载器按 `parameter.txt`
+  重算 GPT 把分区收回，于是文件系统永远比分区大 248 块：
+
+  ```
+  EXT4-fs (mmcblk0p3): bad geometry: block count 30466040
+      exceeds size of device (30465792 blocks)
+  ```
+
+  根分区挂不上，只能进 dracut emergency。已删除该服务并改为只 `resize2fs`；
+  串口恢复步骤见 `docs/troubleshooting.md`。
+
 
 ### Changed
 - rpmlist 增加 v4l-utils / i2c-tools / usbutils / gstreamer1-plugins-bad-free
