@@ -27,20 +27,24 @@ git diff --stat upstream/master -- scripts documents
 | 路径 | 偏离 | 引入 commit | 原因 |
 |---|---|---|---|
 | `scripts/build.sh` | 修改 | C2 | 增加 `--layout gpt\|vendor`，默认 vendor |
-| `scripts/build_boot.sh` | 修改 | C2 | 新增 `mk_extboot()`；内核复用（`dtb_name` 变化不重编） |
+| `scripts/build_boot.sh` | 修改 | C2/C11 | 新增 `mk_extboot()`；C11 起才真正从重编判据去掉 `dtb_name`（此前换板仍会全量重编） |
 | `scripts/build_rootfs.sh` | 修改 | C2 | 调用 `POST_BOARD_OVERLAY` 钩子 |
 | `scripts/gen_image.sh` | 修改 | C2 | extboot 布局下替换占位 root UUID |
 | `scripts/configs/common/rpmlist` | 修改 | C2 | 补 iw / wireless-regdb / NetworkManager-wifi |
 | `scripts/configs/common/extlinux.conf` | 修改 | C2 | 调整启动参数 |
 | `scripts/bin/tools/rockchip/rk3588-pack/afptool` | 仅 chmod +x | C2 | 打包工具需可执行 |
 | `scripts/bin/tools/rockchip/rk3588-pack/rkImageMaker` | 仅 chmod +x | C2 | 同上 |
-| `scripts/gen_rk_update.sh` | 新增 | C3 | vendor 布局出 `update.img` |
+| `scripts/gen_rk_update.sh` | 新增/修改 | C3/C11 | vendor 布局出 `update.img`；C11 起 SoC 参数化（loader 前缀 / MINIALL.ini / rkImageMaker 标签） |
 | `scripts/mk_initrd.sh` | 新增 | C3 | chroot 内生成 aarch64 initramfs |
 | `scripts/boards/lubancat-5.conf` | 新增 | C3 | LubanCat-5 板级配置 |
 | `scripts/overlay/lubancat-5/**` | 新增 | C3 | 板型识别服务与脚本 |
 | `scripts/configs/common/{boot.cmd,lubancat_linux_rk3588_defconfig,rpmlist-lubancat-desktop}` | 新增 | C3 | 板卡启动脚本 / 内核配置 / 包清单 |
 | `scripts/bin/{libmali,multimedia,npu,u-boot/lubancat-5}` | 新增 | C4 | 厂商二进制 |
 | `pkg/`、`manifests/`、`docs/`、`build/*.sh` | 新增 | C5/C6 | 打包源、构建溯源与工程文档 |
+| `tools/build-image.sh` | 新增 | C11 | 统一构建入口：选 SoC → 选板卡 → 选桌面(ukui/none)，包装 `scripts/build.sh` |
+| `scripts/boards/matrix.tsv` | 新增 | C11 | 板卡矩阵，新增板卡只改这里一行 |
+| `scripts/configs/common/rpmlist-headless` | 新增 | C11 | 无桌面包清单（`rpmlist` 去掉 4 行桌面项） |
+| `tests/test-build-image.sh` | 新增 | C11 | 矩阵与入口脚本的静态校验（CI 可跑） |
 
 ## 同步上游（按需）
 
