@@ -18,9 +18,9 @@
 #   - Cat-0/1/2 的 ubootconfig/loader_prefix 用 rk3566（loader 文件是 rk3566_spl_loader_*.bin）
 #
 # family	board	kern_defconfig	kern_branch	status	note
-rk3588	lubancat-5	lubancat_linux_rk3588_defconfig	lubancat-5	verified	alpha10 实机通过（ukui + headless 待补）
-rk3588	lubancat-4	lubancat_linux_rk3588_defconfig	lubancat-5	blocked:conf,uboot	RK3588S；soc_name 写 rk3588，dtb 用 rk3588s-lubancat-4
-rk3576	lubancat-3	lubancat_linux_rk3576_defconfig	lubancat-3	blocked:conf,uboot	boot_size 建议 512；rk3576 用 Mali-G52
-rk356x	lubancat-2	lubancat_linux_rk356x_defconfig	lubancat-2	blocked:conf,uboot	RK3568；soc_name 写 rk356x
-rk356x	lubancat-1	lubancat_linux_rk356x_defconfig	lubancat-1	blocked:conf,uboot	RK3566；ubootconfig 用 rk3566.config（fragment）
-rk356x	lubancat-0	lubancat_linux_rk356x_defconfig	lubancat-0	blocked:conf,uboot	需实机标定 SARADC 板型映射
+rk3588	lubancat-5	lubancat_linux_rk3588_defconfig	lbc-develop-6.1	verified	alpha10 实机通过（ukui + headless 待补）
+rk3588	lubancat-4	lubancat_linux_rk3588_defconfig	lbc-develop-6.1	blocked:conf,uboot	RK3588S；soc_name 写 rk3588，dtb 用 rk3588s-lubancat-4
+rk3576	lubancat-3	lubancat_linux_rk3576_defconfig	lbc-develop-6.1	buildable	已备 conf + SDK 的 rk3576 uboot.img/loader；待实机验证
+rk356x	lubancat-2	lubancat_linux_rk356x_defconfig	lbc-develop-6.1	blocked:conf,uboot	RK3568；soc_name 写 rk356x
+rk356x	lubancat-1	lubancat_linux_rk356x_defconfig	lbc-develop-6.1	blocked:conf,uboot	RK3566；ubootconfig 用 rk3566.config（fragment）
+rk356x	lubancat-0	lubancat_linux_rk356x_defconfig	lbc-develop-6.1	blocked:conf,uboot	需实机标定 SARADC 板型映射
