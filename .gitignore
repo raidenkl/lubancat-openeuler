@@ -54,3 +54,6 @@ conf.local
 *.pem
 *.key
 !**/*.pub
+
+# rpm 是构建产物，由 tools/build-rpms.sh 从 pkg/SPECS + pkg/SOURCES 生成
+/scripts/bin/rpms/*/*.rpm

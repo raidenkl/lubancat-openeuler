@@ -654,3 +654,6 @@ buildarch_compat: loongarch64: noarch
 # \endverbatim
 #*/
 buildarch_compat: x86_64: noarch aarch64
+
+# 让 x86_64 构建机可以产出 aarch64 包（本项目所有 rpm 都是 aarch64）
+buildarch_compat: x86_64: aarch64
