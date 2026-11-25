@@ -1,0 +1,21 @@
+[Unit]
+Description=LubanCat board identification (SARADC) and extboot dtb/uEnv selection
+Documentation=https://github.com/raidenkl/lubancat-openeuler/blob/main/docs/building.md
+# 识别成功后脚本会 touch /boot/.board_init 并重启一次；之后本单元被条件跳过
+ConditionPathExists=!/boot/.board_init
+RequiresMountsFor=/boot
+After=local-fs.target
+Before=getty.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/lubancat/board-init.sh
+# systemd 默认只把 stdout 收进 journal，而本镜像的 journal 是 volatile：
+# 脚本末尾 reboot 一执行，BOARD_ID 那几行就没了。加 console 等于恢复厂商
+# 在 init.d 下直接打到串口的效果。
+StandardOutput=journal+console
+StandardError=journal+console
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
