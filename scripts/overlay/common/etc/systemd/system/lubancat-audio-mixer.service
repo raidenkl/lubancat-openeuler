@@ -1,0 +1,21 @@
+[Unit]
+Description=LubanCat: enable ES8388 headphone output path (OUT1)
+Documentation=https://github.com/raidenkl/lubancat-openeuler/blob/main/docs/peripheral-verification.md
+# 必须排在发行版的 alsa 状态恢复之后，否则 asound.state 会把 OUT1 又写回 off。
+# openEuler 默认装 alsa-state(rdaemon) 与 alsa-restore，两者按 /etc/alsa/state-daemon.conf 二选一。
+# 还要排在 lightdm 之后：耳机插拔由 multicodecs 卡的 jack 上报，开机早期那次上报
+# 可能在 codec 就绪前就判成"未插入"，把 Headphone 引脚关掉；等它报完再断言才留得住。
+After=sound.target alsa-restore.service alsa-state.service lightdm.service
+Wants=sound.target
+ConditionPathExists=/proc/asound/cards
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/lubancat/audio-init.sh
+# 串口可见：镜像默认 journald 是 volatile，出问题时至少串口能留下痕迹
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target
