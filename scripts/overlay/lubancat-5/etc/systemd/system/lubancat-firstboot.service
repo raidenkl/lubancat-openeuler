@@ -1,10 +1,11 @@
 [Unit]
 Description=LubanCat first boot configuration (unique machine-id/hostname/ssh keys)
 Documentation=https://github.com/raidenkl/lubancat-openeuler/blob/main/docs/security-notes.md
-# 镜像内 /etc/machine-id 被截断为空，systemd 将本次启动标记为 FirstBoot
-ConditionFirstBoot=yes
+# 不用 ConditionFirstBoot：首启时 board-init 选完 dtb 会 reboot，本单元可能被打断，
+# 而 machine-id 一旦提交该条件就永久为假，主机名将再也不会被设置。
+# 只以 marker 做幂等判断，被打断后下次启动自动补跑。
 ConditionPathExists=!/var/lib/lubancat/firstboot.done
-After=local-fs.target systemd-machine-id-commit.service
+After=local-fs.target systemd-machine-id-commit.service lubancat-board-init.service
 Wants=systemd-machine-id-commit.service
 
 [Service]

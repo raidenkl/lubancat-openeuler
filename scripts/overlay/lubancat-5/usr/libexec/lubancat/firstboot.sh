@@ -22,8 +22,11 @@ if [ -z "$MID" ]; then
     printf "%s\n" "$MID" > /etc/machine-id
 fi
 
-# 2) 唯一主机名：LubanCat-<board>-<machine-id 前 6 位>
-BOARD=LubanCat-5
+# 2) 唯一主机名：<板型>-<machine-id 前 6 位>
+# 板型名由 lubancat-board-init.sh 从厂商映射表写入；表里有带空格的（"LubanCat-3 v2"），
+# 空格换成 - 才能当主机名。文件缺失时退回不带板型的通用前缀。
+BOARD=$(cat /etc/lubancat/board-name 2>/dev/null | tr " " "-" | tr -d "\n")
+[ -n "$BOARD" ] || BOARD=LubanCat
 HN="${BOARD}-$(printf "%s" "$MID" | cut -c1-6)"
 if command -v hostnamectl >/dev/null 2>&1; then
     hostnamectl set-hostname "$HN" 2>/dev/null || {
