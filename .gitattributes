@@ -13,6 +13,8 @@
 *.rpm       binary
 *.deb       binary
 *.tar.gz    binary
+# iqfiles 等厂商资产必须逐字节入库：行尾转换会让仓库内容与 rpm 里的文件不一致
+pkg/SOURCES/**/*.json -text
 *.tar.zst   binary
 *.xz        binary
 *.zst       binary
