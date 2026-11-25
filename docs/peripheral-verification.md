@@ -13,11 +13,13 @@
 
 ```sh
 # 1) 构建机上把资产推过去（只做一次，重刷镜像后要重推）
+#    npu-smoke.c / check_periph.sh / gpu-bench.c 来自仓库 build/，model/ 与 include/ 见第 2 节
 scp -r /path/to/lubancat-test root@<板卡IP>:/opt/
 
 # 2) 板端
 cd /opt/lubancat-test
 gcc -O2 -I include npu-smoke.c -o npu-smoke -L/usr/lib64 -lrknnrt -lpthread -ldl -lm
+# gpu-bench.c 由 check_periph.sh 自己编，不用手工编；想单独跑见第 1 节
 sudo bash check_periph.sh            # 全量，约 2 分钟
 sudo bash check_periph.sh --quick    # 只做状态检查，不写盘
 sudo bash check_periph.sh --stress   # NPU 跑 1000 次，看温升
@@ -49,51 +51,83 @@ usermod -aG video lubancat     # /dev/mali0、/dev/rga、/dev/mpp_service 都是
 ### 验什么
 
 - 内核驱动是否识别到 GPU、用户态库版本
-- EGL 能不能初始化、渲染器是不是 Mali（而不是 llvmpipe）
+- EGL 能否初始化、GLES 能否**真的出像素**（回读校验），以及吞吐
+- 桌面 GL 是不是 Mali（结论：不是，见「桌面为什么是 llvmpipe」）
 
 ### 命令
 
 ```sh
-cat /sys/class/misc/mali0/device/gpuinfo                  # Mali-G52 3 cores r1p0 0x07040002
-strings /usr/lib64/libmali.so.1.9.0 | grep -m1 g13p0     # g13p0
-cat /usr/local/bin/mali-env                               # 看 hook 怎么挂
-# X 在跑时带上 DISPLAY/XAUTHORITY，且必须走 mali-env
-DISPLAY=:0 XAUTHORITY=/run/lightdm/root/:0 mali-env es2_info
+cat /sys/class/misc/mali0/device/gpuinfo                  # Mali-G52 3 cores r1p0
+dmesg | grep 'Kernel DDK version'                         # g25p0-00eac0
+strings /usr/lib64/libmali.so.1.9.0 | grep -m1 g13p0      # g13p0-01eac0
+
+# 关键：必须走 GBM 平台 + 显式指到 DRM 节点，且只用 pbuffer
+gcc -O2 -o /tmp/gpu-bench build/gpu-bench.c -lEGL -Wl,-l:libgbm.so.1 -lGLESv2
+LD_LIBRARY_PATH=/usr/lib64/mali /tmp/gpu-bench /dev/dri/renderD128 300
 ```
 
 ### 期望
 
-`gpuinfo` 含 `Mali-G52`；`es2_info` 打印 `GL_RENDERER: Mali-G52 ...`。
-
-**判断 EGL 是否真的走了 Mali，只能看 `GL_RENDERER` 行里有没有 `Mali`**。
-不能直接 `grep Mali` —— 失败时库会打印 `[MALI-HOOK] WARN: Native display(...) ignored!`，
-那个 `MALI-HOOK` 会造成假阳性（本脚本第一版就踩了这个坑）。
-
-### 当前状态：不可用（SKIP）
-
-本机实测（LubanCat-3 V2 / 6.1.99-rk3576）：
-
 ```
-[MALI-HOOK] WARN: Native display(0x...) ignored!
-arm_release_ver: g13p0-01eac0, rk_so_ver: 11
-Error: eglInitialize() failed
+EGL 1.4  vendor=ARM
+EGL_VERSION=1.4 Bifrost-"g13p0-01eac0"
+SURFACE_TYPE=pbuffer
+GL_VENDOR   = ARM
+GL_RENDERER = Mali-G52
+GL_VERSION  = OpenGL ES 3.2 v1.g13p0-01eac0...
+READPIXEL   = 255,0,0,255
+FRAMES=300  PER_FRAME=1.461 ms  FPS=684.4  PIXELFILL=1.4 Gpix/s
+RESULT=PASS
 ```
 
-`mali-env eglinfo` 的 **X11 / GBM / Wayland 三个平台都是 `eglInitialize failed`**，
-root 与 `lubancat` 身份一致；`ldd /usr/lib64/libmali.so.1.9.0` 无缺失依赖；
-kbase 侧能通信（dmesg 有 `Clearing BASE_MEM_UNCACHED_GPU flag`）。
+判据：`vendor=ARM`、`GL_RENDERER = Mali-G52`、`OpenGL ES 3.2`、`READPIXEL` 为 `255,0,0,255`
+（说明像素真是 GPU 算出来并回读得到的，不是空跑）、FPS > 200。
 
-**可以排除的**：内核 DDK `g25p0` 与用户态 `g13p0` 的版本组合 —— DDK 高于 so 是允许方向
-（只不允许 so 比 DDK 新），且 SDK 与 yocto 里 G52 都只提供 g13p0。
+### 为什么 `eglinfo` / `es2_info` 全失败（已定论）
 
-**待查方向**（尚未定论，单独跟进）：
+`eglinfo` 走的是 `eglGetDisplay(EGL_DEFAULT_DISPLAY)`，即 **X11/DRI2** 那条路，本镜像上必然失败：
 
-1. X 持有 DRM master / 无 DRI2 —— 停掉 `lightdm` 后再试 `eglinfo` 的 GBM 平台
-2. `libmali` 的 X11 后端走 DRI2（`ldd` 里有 `libxcb-dri2`），而当前 X 是 llvmpipe 纯软件栈
-3. 用最小 GBM 程序（`gbm_create_device` + `eglGetPlatformDisplay(EGL_PLATFORM_GBM_KHR)`）拿具体错误码
-4. hook 桩（`/usr/lib64/mali/libmali-hook.so.1`）的行为，可试绕过直接链真库
+```
+GBM platform:      eglinfo: eglInitialize failed
+Wayland platform:  eglinfo: eglInitialize failed
+X11 platform:      eglinfo: eglInitialize failed
+```
 
-桌面本身不受影响：ukui 走 mesa/llvmpipe；GPU 只在 `mali-env` 按需使用时才需要。
+- **X11 平台**：X 自己没有 GPU。`Xorg.0.log` 里是
+  `modeset(0): Refusing to try glamor on llvmpipe` → `AIGLX: Screen 0 is not DRI2 capable`
+  → `GLX: Initialized DRISWRAST GL provider`，`glxinfo` 的 renderer 就是 `llvmpipe`。
+  Mali 不是 Mesa 驱动，X 拿不到 DRI2，`EGL_DEFAULT_DISPLAY` 无从初始化。
+- **GBM 平台（eglinfo 的写法）**：它建完 `gbm_device` 后要用 `EGL_WINDOW_BIT` 的 config
+  挂一个 scanout surface；X 正持有 DRM master，window surface 直接 `EGL_BAD_MATCH`（0x3009）。
+- **Wayland 平台**：没有 Wayland 合成器在跑。
+
+把 EGL 显式绑到 **GBM 平台 + DRM 节点**、并且只用 **pbuffer**（不需要 master、不需要扫描输出），
+一切正常 —— 上面的实测就是这条路。
+
+**结论：GPU 本身没问题，之前是探测路径选错了。`eglinfo` 的 `eglInitialize failed`
+不能用来判断「GPU 坏没坏」。**
+
+### 顺带排除的两个怀疑
+
+| 怀疑 | 结论 |
+|---|---|
+| 内核 DDK `g25p0` 比用户态 `g13p0` 新 | **不是问题**。DDK 高于 so 是允许方向（只不允许 so 比 DDK 新），实测初始化成功即证 |
+| `libmali` 缺依赖 / 打不开设备 | **不是**。`ldd` 无缺失；`open("/dev/mali0")` 成功；kbase 正常分配内存 |
+
+### 桌面为什么是 llvmpipe（预期行为）
+
+ukui 跑在 X11 上，X 没有 Mali 的 DRI2/GLX 集成，所以桌面是软件渲染。
+要让桌面用 GPU，得给 X 提供 Mali 的 GLX，或改走 Wayland 合成器 —— 属于另一件事。
+需要 GPU 的应用用 `mali-env` + GBM（离屏渲染、合成器、`kmscube` 类）即可。
+
+### 失败含义
+
+| 现象 | 含义 |
+|---|---|
+| `vendor=Mesa Project` | 加载到系统 mesa 的 libEGL 了，检查 `LD_LIBRARY_PATH=/usr/lib64/mali` |
+| 连 `vendor` 都没打印就失败 | hook 没找到真库：`ldd /usr/lib64/mali/libEGL.so.1` 看是否指向 `libmali.so.1` |
+| `eglCreateWindowSurface` 返回 `0x3009` | 用了 window surface。X 持有 master 时建不出来，改 pbuffer |
+| `GL_RENDERER` 里没有 `Mali` 但有 `MALI-HOOK` | 假阳性：那是 hook 的告警文案，只认 `GL_RENDERER` 行 |
 
 ---
 
@@ -257,24 +291,80 @@ ls -l /tmp/cam.nv12                                          # ≈29 MB
 
 ---
 
-## 6. 音频
+## 6. 音频 / 3.5mm 耳机
 
 ### 命令
 
 ```sh
-aplay -l                                    # 3 张卡
-cat /proc/asound/cards
-timeout 15 speaker-test -D hw:0 -t sine -f 440 -l 1 -p 1     # 用退出码判 DMA
-cat /proc/asound/card1/eld#*                # HDMI ELD
+aplay -l                                                     # 3 张卡
+amixer -c 0 sget OUT1                                        # 耳机输出混音器，必须 on
+timeout 15 speaker-test -D hw:0,0 -t sine -f 440 -l 1 -p 1   # 用退出码判 DMA
+grep -E 'gpio-13[68]' /sys/kernel/debug/gpio                 # hp-det / hp-con
+awk '$1=="04:"{print $2}' /sys/kernel/debug/regmap/3-0011/registers   # ES8388 R4
+cat /proc/asound/card1/eld#*                                 # HDMI ELD
 ```
 
 ### 期望与判据
 
 - `aplay -l` 至少 3 张卡：`rockchipes8388`(card0，唯一带 capture)、`rockchip-hdmi`、`rockchip-dp0`
-- `speaker-test` **退出码 0** = DMA 通路正常（有没有声音要人耳确认）
-- **退出码 124 = TIMEOUT**，这是 DMA 卡住的信号 —— Cat-5 上出现过：PL330 的音频描述符
+- `amixer -c 0 sget OUT1` 必须 **on**（见下面「3.5mm 无声的根因」）
+- `speaker-test` **退出码 0** = DMA 通路正常
+- **退出码 124 = TIMEOUT**，DMA 卡住的信号 —— Cat-5 上出现过：PL330 的音频描述符
   258 B 超过默认 `mcbufsz` 256 B，`aplay` 永久阻塞（见 `manifests/alpha7-summary.txt`）
+- **播放中** `hp-con`（GPIO4_B2）应为 **out hi**，ES8388 `R4` 的 bit7/bit6（左右 DAC 掉电位）
+  必须为 0（正常值 `3c`，掉电时是 `c0`）。这两条是「通路真的通电了」的硬证据，
+  不依赖人耳；`R2` 正常为 `00`，掉电时是 `ff`
 - 无 ELD 只是「显示器不带音频 sink」，属 WARN，不是故障
+
+### 3.5mm 无声的根因（2026-11-25 定位并修复）
+
+**症状**：插耳机完全没声音，但一切看起来都正常 —— `aplay` 不报错、PCM `state: RUNNING`、
+`hw_ptr` 正常推进、`dmesg` 干净。
+
+**根因**：`/var/lib/alsa/asound.state` 里 `OUT1 Switch` / `OUT2 Switch` 是 `false`，
+开机 alsa 状态恢复照搬这个值。而 ES8388 的模拟输出链路是
+
+```
+Playback 流 -> Left DAC -> Left Mixer -> Left Out 1 -> OUT1 -> LOUT1 -> Headphone
+```
+
+`OUT1` 这个输出混音器一关，**DAPM 就找不到从流到 Headphone 引脚的完整通路，
+于是整条链一个部件都不上电**。表现：
+
+```
+dapm_pop_time = 0                        # 上电序列一次都没跑
+Left DAC / Left Mixer / LOUT1 / Headphone: Off
+hp-con = out lo
+ES8388 R2 = ff, R4 = c0                  # 数字部分全关、左右 DAC 掉电
+```
+
+`aplay` 之所以看着正常，是因为 SAI 侧 DMA 照跑，只是数据进了没上电的 codec。
+
+**修复**：`scripts/overlay/common/usr/libexec/lubancat/audio-init.sh` +
+`lubancat-audio-mixer.service`，开机把 `OUT1` 和 `Headphone` 两个**功能使能**开关置 on
+（音量不动，属于用户偏好）。单元排在 `alsa-restore` / `alsa-state` **和 `lightdm` 之后**：
+
+- 排在 alsa 之后：否则 `asound.state` 会把 `OUT1` 又写回 off
+- 排在 lightdm 之后：multicodecs 卡的耳机插拔由 jack 上报，开机早期那次上报可能在
+  codec 就绪前就判成「未插入」并把 `Headphone` 引脚关掉；等它报完再断言才留得住
+
+**验证**（本机实测）：重启后 `OUT1=on`、`Headphone=on`；插着耳机放音时
+`hp-con = out hi`、`Left DAC/Mixer/LOUT1/Headphone = On`、`R2=00`、`R4=3c`，人耳确认有声。
+
+### 排查这类"看着正常却没声"的顺序
+
+1. `amixer -c 0 contents` 逐项看：输出通路上有没有开关是 off（尤其 `OUT1`）
+2. `cat /sys/kernel/debug/asoc/<card>/dapm_pop_time` 恒为 0 → DAPM 上电序列没跑过
+3. 看 codec 的 widget 状态（`/sys/kernel/debug/asoc/*/ES8323.3-0011/dapm/`）与寄存器
+   （`/sys/kernel/debug/regmap/3-0011/registers`，`i2cdump` 会被驱动占用而报 busy）
+4. `grep gpio . /sys/kernel/debug/gpio` 看 `hp-det`（耳机检测）与 `hp-con`（通路使能）
+5. 耳机在不在：`python3` 读 `EVIOCGSW`（`/dev/input/event3`），或直接看 `hp-det`
+
+### 其它两点
+
+- Cat-3 **只有 3.5mm 接口、没有扬声器**，所以只开 `OUT1`，`Speaker`/`OUT2` 保持 off
+- HDMI/DP 声卡在没接带音频的显示器时打不开是正常的（`hdmi-audio-codec: Only one
+  simultaneous stream supported!`），不影响模拟输出
 
 ---
 
@@ -318,20 +408,21 @@ done
 
 | 外设 | 结果 | 关键数字 |
 |---|---|---|
-| GPU Mali-G52 | **SKIP** | `gpuinfo=Mali-G52 3 cores r1p0`；用户态 g13p0；**EGL 三平台 `eglInitialize failed`** |
+| GPU Mali-G52 | **PASS** | `GL_RENDERER = Mali-G52` / `OpenGL ES 3.2`；1080p 清屏 300 帧 **1.461 ms/帧，684 fps，1.4 Gpix/s**，像素回读正确（走 GBM + pbuffer，桌面仍是 llvmpipe） |
 | NPU | PASS | `librknnrt 2.3.0` / driver `0.9.8`；resnet18 224×224 **3.341 ms，299.3 fps**（100 次 0 失败） |
 | VPU 编码 | PASS | 1080p H.264 60 帧 **109.08 fps**，输出 735 KB |
 | VPU 解码 | PASS | 同一码流 **567.26 fps** |
 | GStreamer | PASS | `rockchipmpp` 4 element；`mppvideodec` 跑到 EOS |
 | RGA | 驱动 PASS / 用户态 SKIP | 双核 `probe successfully`、驱动 v1.3.7；无测试工具 |
-| 摄像头 | PASS | imx415 在 cam1（i2c4），`media0` 拓扑可见，1080p NV12 取 10 帧 = 29 MB |
-| 音频 | PASS | 3 张卡；ES8323 (`hw:0`) DMA 正常；HDMI 无 ELD（未接音频 sink） |
+| 摄像头 | PASS（需接模组） | imx415 在 cam1（i2c4），`media0` 拓扑可见，1080p NV12 取 10 帧 = 29 MB；拔掉模组时脚本判 SKIP 而非 FAIL |
+| 音频 3.5mm | **PASS** | 3 张卡；`OUT1=on`、播放中 `hp-con=hi`、`R2=00`/`R4=3c`；人耳确认有声 |
 | 网络 | PASS | `end0` 1000Mb/s，有 IPv4，外网可达 |
 | USB | PASS | 4 个设备（2 root hub + 7-port hub + 鼠标） |
 | 存储 | PASS | `mmcblk0p1/p2/p3`；`/` 28.1 G 用 23% |
 | 温度 | PASS | 最高 55 °C（little-core） |
 
-复跑命令：`sudo bash /opt/lubancat-test/check_periph.sh` → `PASS=32 FAIL=0 SKIP=2 WARN=1`。
+复跑命令：`sudo bash /opt/lubancat-test/check_periph.sh` → `PASS=38 FAIL=0 SKIP=2 WARN=1`
+（摄像头模组拔掉时为 `PASS=36 SKIP=4`）。
 
 与 Cat-5（RK3588）可比的一项：resnet18 推理 Cat-5 是 4.66 ms，Cat-3 是 3.34 ms
 （模型同为 resnet18，输入同为 224×224）。
@@ -342,10 +433,10 @@ done
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| GPU EGL 初始化失败 | 未解决 | 见第 1 节，待查方向已列；桌面不受影响 |
+| 桌面不走 Mali | 预期 | X11 无 Mali DRI2/GLX，桌面是 llvmpipe；GPU 经 GBM 可用（第 1 节） |
 | RGA 无自动化验证 | 缺口 | 无测试工具与头文件，只能开窗看 `rkximagesink` |
 | 摄像头默认不启用 | 设计如此 | uEnv 模板里 dtoverlay 是注释态，要手工开 |
-| 音频是否有声 | 未验 | 脚本只验 DMA 通路，出声需人耳 |
+| 耳机插拔检测不稳定 | 待查 | jack 开机首次上报可能误判「未插入」并把 Headphone 引脚关掉，已用「lightdm 之后再断言」绕过；根因在 `rockchip_multicodecs` 的 jack 初始化时序 |
 | PCIe / mSATA、WiFi/蓝牙 | 未覆盖 | Cat-3 无对应硬件或未接模组 |
 | 画质与 3A 标定 | 未做 | 只验「能取到帧」 |
 

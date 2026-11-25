@@ -5,6 +5,48 @@
 
 镜像命名与 tag 逐字符对应：`<board>_openEuler-24.03-LTS_aarch64_<tag>.img.xz`。
 
+## [Unreleased]（Cat-3：GPU 验证修正 + 3.5mm 耳机无声修复）
+
+### Fixed
+- **3.5mm 耳机无声**：镜像里 `/var/lib/alsa/asound.state` 记录的 `OUT1 Switch` / `OUT2 Switch`
+  是 `false`，开机 alsa 恢复照搬这个值。ES8388 的模拟输出是
+  `Playback -> DAC -> Left Mixer -> Left Out 1 -> OUT1 -> LOUT1 -> Headphone`，
+  `OUT1` 一关，DAPM 找不到完整通路，**整条链一个部件都不上电** ——
+  `aplay` 却一切正常（`state: RUNNING`、`hw_ptr` 正常推进、dmesg 干净），
+  只有 `dapm_pop_time` 恒为 0、`R2=ff`、`R4=c0`、`hp-con` 恒低。
+  新增 `overlay/common/usr/libexec/lubancat/audio-init.sh` +
+  `lubancat-audio-mixer.service` 开机置 `OUT1` / `Headphone` 为 on（不动音量），
+  单元排在 `alsa-restore`/`alsa-state` **和 `lightdm` 之后**：
+  前者否则会被 asound.state 覆盖，后者因为 multicodecs 卡的 jack 首次上报可能在
+  codec 就绪前就判成「未插入」把引脚关掉，等它报完再断言才留得住。
+- **GPU 被误判为不可用**：`eglinfo` / `es2_info` 走 `EGL_DEFAULT_DISPLAY`（X11/DRI2），
+  而 X 没有 Mali 的 DRI2/GLX（`Refusing to try glamor on llvmpipe` /
+  `AIGLX: Screen 0 is not DRI2 capable`），GBM 分支又要 scanout surface 而 X 持有
+  DRM master。把 EGL 显式绑到 GBM 平台 + DRM 节点、只用 pbuffer，一切正常。
+  GPU 本身没有任何问题，是探测路径选错了。
+
+### Added
+- `build/gpu-bench.c`：GBM + GLES2 最小基准，1920×1080 清屏 + `glReadPixels` 回读校验 + 帧率
+- `check_periph.sh` GPU 段改为编译并运行它：判 `vendor=ARM`、`GL_RENDERER = Mali-G52`、
+  `OpenGL ES 3.2`、`READPIXEL = 255,0,0,255`、FPS > 200
+- `check_periph.sh` 音频段新增：`OUT1` 必须 on、播放中 `hp-con` 必须拉高、`R4` 的
+  bit7/bit6 必须清零（三条都是「通路真通电」的硬证据，不依赖人耳）
+- `check_periph.sh` 摄像头段：sensor 未接入（i2c 无应答）判 SKIP 而不是 FAIL；
+  `hw:0,0` 被 PulseAudio 占用时也判 SKIP，不误报
+- `check_l3_ui.sh` 新增 F 段 10 项音频断言
+
+### Verified（LubanCat-3 V2 / 6.1.99-rk3576，实机）
+- GPU：`GL_RENDERER = Mali-G52`，`OpenGL ES 3.2`，1080p 清屏 300 帧
+  **1.461 ms/帧，684 fps，1.4 Gpix/s**，像素回读 `255,0,0,255`
+- 音频：`OUT1=on`、`Headphone=on`；播放中 `hp-con=hi`、`Left DAC/Mixer/LOUT1/Headphone=On`、
+  `R2=00` / `R4=3c`；**人耳确认有声**（重启后由单元自动配置，无需手工干预）
+- `check_periph.sh`：`PASS=38 FAIL=0 SKIP=3 WARN=1`
+- 镜像级验收 `check_l3_ui.sh`：`PASS=76 FAIL=0`
+
+### 镜像
+`openEuler-24.03-LTS-SP3-LubanCat-3-aarch64-ukui-alpha5-20261125.img.xz`
+1,917,752,136 B / sha256 `2241988f7abb70d5593a14982f500e2eb7c7776a03c8f4ce0b00624e46077304`
+
 ## [Unreleased]（Cat-3 外设验证：手册 + 一键脚本）
 
 ### Added

@@ -60,27 +60,39 @@ for f in /sys/class/devfreq/*/cur_freq; do
 done
 
 echo
-echo "--- 1. GPU（Mali）---"
+echo "--- 1. GPU（Mali-G52：GBM 平台 EGL + GLES2 实跑）---"
 GPUINFO=$(cat /sys/class/misc/mali0/device/gpuinfo 2>/dev/null)
 ck "gpuinfo 含 Mali-G52" "yes" "$(printf '%s' "$GPUINFO" | grep -q 'Mali-G52' && echo yes || echo no)"
 printf '  info %-36s %s\n' "gpuinfo" "$GPUINFO"
+ckhas "内核 DDK" "g25p0" "$(dmesg 2>/dev/null | grep -m1 'Kernel DDK version')"
 ckhas "用户态版本 g13p0" "g13p0" "$(strings /usr/lib64/libmali.so.1.9.0 2>/dev/null | grep -m1 g13p0)"
-ck "mali-env 存在" "yes" "$([ -x /usr/local/bin/mali-env ] && echo yes || echo no)"
-# EGL 目前在本内核+X 环境下起不来（已知问题），这里只记录不判 FAIL
-if [ "$MODE" != quick ] && [ -x /usr/local/bin/mali-env ]; then
-    EGL_OUT=$(DISPLAY=:0 XAUTHORITY=/run/lightdm/root/:0 mali-env es2_info 2>&1 | head -8)
-    # 只认 GL_RENDERER 行里带 Mali —— 不能直接 grep Mali，
-    # 失败时库会打印 "[MALI-HOOK] WARN ..."，那样会假阳性
-    EGL_R=$(printf '%s\n' "$EGL_OUT" | grep -i 'GL_RENDERER' | head -1)
-    case "$EGL_R" in
-        *[Mm]ali*)
-            pass "EGL 渲染器" "$EGL_R" ;;
-        *)
-            skip "EGL 渲染器" "eglInitialize 失败（已知问题，见文档 GPU 节）"
-            printf '       %s\n' "$(printf '%s' "$EGL_OUT" | tr '\n' ' ' | head -c 140)" ;;
-    esac
+# 桌面走 X11，X 没有 Mali 的 DRI2/GLX，所以 glxinfo 一定是 llvmpipe。
+# 这是预期行为，不是 GPU 故障；GPU 只能经 GBM 平台（renderD128 / card0）使用。
+printf '  info %-36s %s\n' "桌面 GL 渲染器" "$(DISPLAY=:0 XAUTHORITY=/run/lightdm/root/:0 glxinfo -B 2>/dev/null | grep -m1 'OpenGL renderer' | cut -d: -f2 | sed 's/^ *//')"
+
+if [ "$MODE" = quick ]; then
+    skip "EGL/GLES 实测" "quick 模式"
 else
-    skip "EGL 渲染器" "quick 模式或 mali-env 缺失"
+    SRC="$(dirname "$0")/gpu-bench.c"
+    [ -f "$SRC" ] || SRC=/opt/lubancat-test/gpu-bench.c
+    if [ ! -f "$SRC" ]; then
+        skip "EGL/GLES 实测" "缺 gpu-bench.c（与脚本同目录，或放到 /opt/lubancat-test/）"
+    elif ! gcc -O2 -o "$TMP/gpu-bench" "$SRC" -lEGL -Wl,-l:libgbm.so.1 -lGLESv2 >"$TMP/gpu-build.log" 2>&1; then
+        fail "gpu-bench 编译" "$(tail -2 "$TMP/gpu-build.log" | tr '\n' ' ' | head -c 120)"
+    else
+        GOUT=$(LD_LIBRARY_PATH=/usr/lib64/mali timeout 90 "$TMP/gpu-bench" /dev/dri/renderD128 300 2>&1)
+        ckhas "EGL 初始化（GBM/renderD128）" "vendor=ARM" "$GOUT"
+        ckhas "GL_RENDERER" "GL_RENDERER = Mali-G52" "$GOUT"
+        ckhas "GLES 版本" "OpenGL ES 3.2" "$GOUT"
+        ckhas "像素回读正确" "READPIXEL   = 255,0,0,255" "$GOUT"
+        FPS=$(printf '%s\n' "$GOUT" | sed -n 's/.*FPS=\([0-9.]*\).*/\1/p' | head -1)
+        if [ -n "$FPS" ] && [ "$(echo "$FPS > 200" | bc 2>/dev/null || echo 0)" = 1 ]; then
+            pass "1080p 清屏帧率" "${FPS} fps（阈值 >200）"
+        else
+            fail "1080p 清屏帧率" "${FPS:-无输出} fps（阈值 >200）"
+        fi
+        printf '  info %-36s %s\n' "实测" "$(printf '%s\n' "$GOUT" | grep -E 'PER_FRAME|RESULT' | tr '\n' ' ' | sed 's/  */ /g')"
+    fi
 fi
 
 echo
@@ -173,6 +185,7 @@ fi
 
 echo
 echo "--- 5. 摄像头 / ISP ---"
+SKIP_CAM=0
 if ls /proc/device-tree/i2c@2ac70000 2>/dev/null | grep -q imx415; then
     pass "DT 里有 imx415 节点" "i2c4"
     ISP=$(media-ctl -d /dev/media1 -e "rkisp_mainpath" 2>/dev/null)
@@ -183,14 +196,21 @@ if ls /proc/device-tree/i2c@2ac70000 2>/dev/null | grep -q imx415; then
     for m in /dev/media0 /dev/media1 /dev/media2; do
         if media-ctl -d "$m" -p 2>/dev/null | grep -q imx415; then MT=$m; break; fi
     done
+    # sensor 没插 / 没应答时，DT 节点仍在（overlay 决定），但不会 probe 出 media entity。
+    # 这是硬件状态，不是软件故障 —— 判 SKIP，别报 FAIL。
     if [ -n "$MT" ]; then
         pass "media 拓扑含 imx415" "$MT"
+    elif dmesg 2>/dev/null | grep -q 'imx415 .*: Detected imx415 id'; then
+        fail "media 拓扑含 imx415" "sensor 探到了但 media 里没有，检查 rkcif/rkisp 绑定"
     else
-        fail "media 拓扑含 imx415" "三个 media 设备里都没找到"
+        skip "media 拓扑含 imx415" "sensor 未接入（i2c 无应答，硬件未插）—— DT 节点在，软件侧正常"
+        SKIP_CAM=1
     fi
 
     if [ "$MODE" = quick ]; then
         skip "取流 10 帧" "quick 模式"
+    elif [ "${SKIP_CAM:-0}" = 1 ]; then
+        skip "取流 10 帧" "sensor 未接入"
     else
         CAP="$TMP/cam.nv12"
         timeout 30 v4l2-ctl -d "$ISP" --set-fmt-video=width=1920,height=1080,pixelformat=NV12 \
@@ -210,20 +230,54 @@ else
 fi
 
 echo
-echo "--- 6. 音频 ---"
+echo "--- 6. 音频 / 3.5mm 耳机 ---"
 NCARD=$(aplay -l 2>/dev/null | grep -c '^card ')
 ck "声卡数量 >= 3" "yes" "$([ "$NCARD" -ge 3 ] && echo yes || echo no)"
 printf '  info %-36s %s\n' "声卡" "$(aplay -l 2>/dev/null | grep '^card ' | cut -d: -f1-2 | tr '\n' ' ')"
+# 3.5mm 通路的命门：OUT1（耳机输出混音器）必须为 on。
+# 它为 off 时 DAPM 找不到 Playback->DAC->Mixer->Out1->OUT1->LOUT1->Headphone 的完整通路，
+# 整条链都不上电：aplay 正常、hw_ptr 正常，但完全无声。详见文档音频节。
+ck "OUT1 耳机通路开关" "on" "$(amixer -c 0 sget OUT1 2>/dev/null | tail -1 | sed 's/.*\[\(.*\)\].*/\1/')"
 if [ "$MODE" = quick ]; then
     skip "ES8323 播放" "quick 模式"
+    skip "耳机通路带电" "quick 模式"
 else
-    timeout 15 speaker-test -D hw:0 -t sine -f 440 -l 1 -p 1 >/dev/null 2>&1
+    timeout 15 speaker-test -D hw:0,0 -t sine -f 440 -l 1 -p 1 >"$TMP/spk.log" 2>&1
     rc=$?
     case "$rc" in
         0)   pass "ES8323 播放（card0）" "DMA 正常（是否有声需人耳）" ;;
         124) fail "ES8323 播放（card0）" "TIMEOUT —— DMA 卡住（Cat-5 出现过 PL330 描述符超 mcbufsz）" ;;
-        *)   fail "ES8323 播放（card0）" "rc=$rc" ;;
+        *)
+            if grep -qiE 'busy|resource busy' "$TMP/spk.log"; then
+                # 桌面 PulseAudio 正占着 hw:0,0，不是板子的问题
+                skip "ES8323 播放（card0）" "hw:0,0 被 PulseAudio 占用（关掉正在播放的音频再跑，或用 --quick）"
+            else
+                fail "ES8323 播放（card0）" "rc=$rc $(tail -2 "$TMP/spk.log" | tr '\n' ' ' | head -c 80)"
+            fi
+            ;;
     esac
+
+    # 播放中看芯片是否真上电：hp-con 使能脚 + ES8388 R4 的左右 DAC 掉电位
+    HPDET=$(grep -m1 'hp-det' /sys/kernel/debug/gpio 2>/dev/null)
+    RM=$(ls -d /sys/kernel/debug/regmap/*-0011 2>/dev/null | head -1)
+    if ! printf '%s' "$HPDET" | grep -q ' in  hi'; then
+        skip "耳机通路带电" "未检测到耳机（hp-det=lo），插上耳机后重跑"
+    else
+        speaker-test -D hw:0,0 -t sine -f 440 -p 1 -l 0 >/dev/null 2>&1 &
+        SPK=$!
+        sleep 2
+        HPCON=$(grep -m1 'hp-con' /sys/kernel/debug/gpio 2>/dev/null)
+        R4=$([ -n "$RM" ] && awk '$1=="04:"{print $2}' "$RM/registers" 2>/dev/null)
+        kill $SPK 2>/dev/null; wait $SPK 2>/dev/null
+        case "$HPCON" in
+            *"out hi"*) pass "hp-con 使能脚" "播放中已拉高" ;;
+            *)          fail "hp-con 使能脚" "播放中仍为低，通路未通（${HPCON:-读不到}）" ;;
+        esac
+        case "$R4" in
+            ""|c0|C0) fail "ES8388 DAC 上电" "R4=${R4:-读不到}，左右 DAC 仍掉电（应为 3c 之类）" ;;
+            *)        pass "ES8388 DAC 上电" "R4=$R4（bit7/bit6 已清零）" ;;
+        esac
+    fi
 fi
 ELD=0
 for f in /proc/asound/card1/eld#*; do [ -e "$f" ] && ELD=1; done

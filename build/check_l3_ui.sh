@@ -126,6 +126,21 @@ else
 fi
 
 echo
+echo "--- F. 音频通路（3.5mm 耳机）---"
+AI=$MNT/usr/libexec/lubancat/audio-init.sh
+AU=$MNT/etc/systemd/system/lubancat-audio-mixer.service
+ck "audio-init.sh 存在" "yes" "$([ -f "$AI" ] && echo yes || echo no)"
+ck "audio-init 可执行" "755" "$(stat -c %a "$AI" 2>/dev/null || echo -)"
+ckhas "脚本会打开 OUT1" 'sset OUT1 on' "$(cat "$AI" 2>/dev/null)"
+ckhas "脚本会打开 Headphone 引脚" 'sset Headphone on' "$(cat "$AI" 2>/dev/null)"
+ckhas "不覆盖用户音量（仅兜底）" 'VOL' "$(cat "$AI" 2>/dev/null)"
+ck "audio unit 存在" "yes" "$([ -f "$AU" ] && echo yes || echo no)"
+ckhas "排在 alsa 恢复之后" "alsa-state.service" "$(grep "^After=" "$AU" 2>/dev/null)"
+ckhas "排在 lightdm 之后" "lightdm.service" "$(grep "^After=" "$AU" 2>/dev/null)"
+ck "已 enable 到 multi-user" "yes" "$([ -L "$MNT/etc/systemd/system/multi-user.target.wants/lubancat-audio-mixer.service" ] && echo yes || echo no)"
+ck "与 overlay/common 一致" "yes" "$(cmp -s "$AI" /work/src/SBC-sig/scripts/overlay/common/usr/libexec/lubancat/audio-init.sh && echo yes || echo no)"
+
+echo
 echo "================ RESULT: PASS=$PASS FAIL=$FAIL ================"
 [ "$FAIL" -eq 0 ] && echo "全部通过" || echo "有失败项，见上"
 exit $([ "$FAIL" -eq 0 ] && echo 0 || echo 1)
