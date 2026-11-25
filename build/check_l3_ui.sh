@@ -41,6 +41,10 @@ if mount -o loop,ro "$BM" $B/l3boot 2>/dev/null; then
     ck "boot.img uEnv 文件数" "7" "$(ls $B/l3boot/uEnv/*.txt 2>/dev/null | wc -l)"
     ck "boot.img 板级 dtb 数(3)" "3" "$(ls $B/l3boot/dtb/rk3576-lubancat-3.dtb $B/l3boot/dtb/rk3576-lubancat-3-v2.dtb $B/l3boot/dtb/rk3576-lubancat-3io.dtb 2>/dev/null | wc -l)"
     ck "boot.img 有 generic dtb" "yes" "$([ -f $B/l3boot/dtb/rk3576-lubancat-generic.dtb ] && echo yes || echo no)"
+    ck "boot.img dtbo 数 > 0" "yes" "$([ "$(ls $B/l3boot/dtb/overlay/*.dtbo 2>/dev/null | wc -l)" -gt 0 ] && echo yes || echo no)"
+    ckhas "boot.cmd 记录 uEnv 真实长度" "setenv uenv_size" "$(cat $B/l3boot/boot.cmd 2>/dev/null)"
+    ckhas "boot.cmd 覆盖 dtfile 的 size" "setenv size" "$(cat $B/l3boot/boot.cmd 2>/dev/null)"
+    ckhas "boot.scr 已带上 uenv_size" "uenv_size" "$(strings $B/l3boot/boot.scr 2>/dev/null | tr '\n' ' ')"
     umount $B/l3boot
 else
     ck "boot.img 可挂载" "yes" "no"

@@ -367,3 +367,79 @@ ls /etc/X11/xorg.conf.d/                         # 有没有 OutputClass + Prima
 2. 在串口上手工跑 `Xorg :1` 会看到
    `logind integration requires -keeptty and -keeptty was not provided`，
    那是手工调试产物；lightdm 拉起的 X 不受影响，别顺着这条去改 `-keeptty`。
+
+## 设备树插件（dtoverlay）不生效
+
+### 症状
+
+uEnv.txt 里已取消注释 `dtoverlay=...`、`enable_uboot_overlays=1`，但串口上没有
+任何 `loading overlay:`，只有：
+
+```
+[boot.cmd] applying overlays from /uEnv/uEnv.txt
+DTOVERLAY[debug]: himport_r: can't malloc 16777217 bytes
+```
+
+开机后 `/proc/device-tree/` 里也找不到 overlay 应该加进来的节点。
+
+### 根因：`size` 不是缓冲区大小，而是 uEnv.txt 的文本长度
+
+`cmd/dtfile.c:38-47`：
+
+```c
+buf  = env_get("size");                  // uEnv.txt 里的 size=0x1000000
+size = simple_strtoul(buf, NULL, 16);    // → 16 MiB
+if ((data = malloc(size + 1)) == NULL) { // 16777217 = 0x1000000 + 1
+    dtoverlay_debug("himport_r: can't malloc %lu bytes\n", size + 1);
+    return 0;                            // ← 失败也返回"成功"
+}
+memcpy(data, ptr, size);                 // 从 env_addr_r 拷 size 字节再解析
+```
+
+- uEnv 模板本来只有 6 KB，`size=0x1000000` 是厂商模板里的遗留值
+- 16 MiB 的**整块连续堆**在 32 MiB 池里不一定拿得到；拿不到就 `return 0`
+- boot.cmd 无从判断，直接 `booti`，所以既不报错也不生效
+
+顺带一个容易误判的点：`argv[3]`（`/uEnv/uEnv.txt`）在 dtfile 里**只被打印、从未用于
+读文件**（`dtfile.c:36` 只取 `argv[4]`）。所以"改的 uEnv.txt 和读的不是同一份"只是
+错觉——文件是同一份，但**长度取自 env 的 `size`**，不是文件真实大小。
+
+那句 `himport_r: can't malloc` 是从 `lib/hashtable.c:792` 抄来的文案，不是 himport_r
+打的（它用 `debug()`，不带 `DTOVERLAY[` 前缀），别顺着 himport_r 去查 env import。
+
+### 修法
+
+已修在 `scripts/configs/common/boot.cmd`：`load` 完 uEnv.txt 立刻记录真实长度，
+`dtfile` 之前覆盖 `size`：
+
+```sh
+  load ... ${env_addr_r} /uEnv/uEnv.txt
+  setenv uenv_size ${filesize}       # fs/fs.c:505 是 env_set_hex，无前缀 hex
+  env import -t ${env_addr_r} 0x8000
+  ...
+  setenv size 0x8000                 # 兜底，与 env import 上限一致
+  if test -n "${uenv_size}"; then setenv size ${uenv_size}; fi
+  dtfile ${fdt_addr_r} ${fdt_over_addr} /uEnv/uEnv.txt ${env_addr_r}
+```
+
+现场也可以先不动镜像验证：把 `/boot/uEnv/uEnv.txt` 的 `size=0x1000000` 改成
+`size=0x2000`（`dtfile` 读的是 `env import` 之后的值）。若改完仍失败，注意别让
+`memcpy(size)` 读到文件末尾之后的 DRAM 垃圾——把文件补齐到与 `size` 等长最稳。
+
+### 为什么别的板子"没这个问题"
+
+同一份 `dtfile.c`、同一个 `size`、两边 `CONFIG_SYS_MALLOC_LEN` 都是 32 MiB
+（`rk3576_common.h:25` / `rk3588_common.h:23`）。差别只在"分配那一刻堆里还剩多少
+连续空间"——Cat-5 上曾侥幸拿到 16 MiB，所以看起来正常。这是运气，不是设计正确；
+Image/initrd/分区尺寸一变就可能复现。所以修在共用的 boot.cmd 里。
+
+### 验收
+
+```sh
+# 串口应出现
+loading overlay: /dtb/overlay/rk3576-lubancat-3-cam1-imx415-1920x1080-60fps-overlay.dtbo
+# 板端
+dmesg | grep -iE "imx415|rkcif|rkisp"      # sensor probe / notifier completed
+tr -d '\0' < /proc/device-tree/csi2-dphy1/status; echo   # okay
+ls /dev/video*
+```

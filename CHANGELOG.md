@@ -5,6 +5,29 @@
 
 镜像命名与 tag 逐字符对应：`<board>_openEuler-24.03-LTS_aarch64_<tag>.img.xz`。
 
+## [Unreleased]（LubanCat-3 桌面版 alpha4：修 u-boot overlay 不生效）
+
+### Fixed
+- **设备树插件（dtoverlay）静默不生效**：串口只有
+  `DTOVERLAY[debug]: himport_r: can't malloc 16777217 bytes`。根因在
+  `cmd/dtfile.c:38-47`——它把 uEnv.txt 里的 `size=0x1000000` 当成 uEnv.txt 的**文本长度**，
+  先 `malloc(size+1)`（16 MiB+1）再 `memcpy(size)` 解析；malloc 失败后 **`return 0`**
+  （看着像成功），overlay 全部跳过。uEnv.txt 真实只有 6 KB。
+- 这也解释了"uEnv.txt 似乎读的不是同一份"：`argv[3]`（`/uEnv/uEnv.txt`）在 dtfile 里
+  只被打印、从未用于读文件，长度取自 env 的 `size` 而非文件真实大小
+
+### Changed
+- `scripts/configs/common/boot.cmd`：`load` 完 uEnv.txt 立刻
+  `setenv uenv_size ${filesize}`，`dtfile` 前 `setenv size ${uenv_size}`
+  （兜底 `0x8000`，与 `env import` 上限一致），并打印 `overlays applied, size=`
+- `scripts/build_boot.sh`：dtbo 拷贝补计数断言，0 个直接报错（原来只有 `|| true`）
+
+### Added
+- `build/check_l3_ui.sh` boot.img 段 4 项断言：dtbo 数 > 0、boot.cmd 含
+  `setenv uenv_size`、含 `setenv size`、boot.scr 里 grep 得到 `uenv_size`
+- `manifests/lubancat-3-ukui-alpha4-20261125.txt`
+- `docs/troubleshooting.md`：新增「设备树插件（dtoverlay）不生效」一节
+
 ## [Unreleased]（LubanCat-3 桌面版 alpha3：修 X 主 GPU 选择）
 
 ### Fixed

@@ -1,0 +1,78 @@
+LubanCat-3（RK3576）桌面版 alpha4 —— 修 u-boot 设备树插件（overlay）不生效
+=====================================================================
+镜像     : openEuler-24.03-LTS-SP3-LubanCat-3-aarch64-ukui-alpha4-20261125.img.xz
+大小     : 1,966,930,824 B (1.83 GiB)
+sha256   : 11a46fd40b75640862e5723f3d7f7f5d2c85661105ebf758f6fd5445d4b53e1a
+rootfs   : UUID 6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01，1965056 块（首启 growfs 扩到盘尾）
+内核     : 6.1.99-rk3576
+boot     : 512 MiB ext2，dtb 6 + dtb/overlay 78 dtbo + uEnv 7
+
+问题现象（alpha2/alpha3 实机）
+------------------------------
+uEnv.txt 里取消注释 cam1 的 dtoverlay、enable_uboot_overlays=1，但串口没有任何
+overlay 生效记录，只留两句：
+
+  [boot.cmd] applying overlays from /uEnv/uEnv.txt
+  DTOVERLAY[debug]: himport_r: can't malloc 16777217 bytes
+
+根因（已实测确认）
+------------------
+cmd/dtfile.c:38-47（厂商 SDK 与我们 src/u-boot 该文件逐字节相同）：
+
+  buf  = env_get("size");                    // uEnv 第 3 行 size=0x1000000
+  size = simple_strtoul(buf, NULL, 16);      // -> 16 MiB
+  if ((data = malloc(size + 1)) == NULL) {   // 16777217 = 0x1000000+1
+      dtoverlay_debug("himport_r: can't malloc %lu bytes\n", size + 1);
+      return 0;                              // <- 失败也返回"成功"
+  }
+  memcpy(data, ptr, size);                   // 从 env_addr_r 拷 size 字节
+
+即：size 不是缓冲区大小，而是 uEnv.txt 的文本长度（真实 6219 B）。16 MiB 的整块
+连续堆拿不到 -> malloc 失败 -> dtfile 返回 0 -> boot.cmd 无从判断 -> overlay 静默跳过。
+另外 argv[3]（/uEnv/uEnv.txt）只在第 27 行被打印，从未用于读文件，所以"uEnv.txt
+似乎读的不是同一份"的观感就来自这里：长度取自 env 的 size，不是文件真实大小。
+
+Cat-5 为什么没暴露：dtfile.c 同一份、size 同为 0x1000000、CONFIG_SYS_MALLOC_LEN
+两边都是 32MiB（Cat-3 的 u-boot.bin 反汇编确认 movk x1,#0x200,lsl#16）。
+manifests/alpha2-summary.txt:53 记着 Cat-5 上 dtfile 确实生效 -> 那次 16MiB 恰好
+拿到了整块。属侥幸通过，不是设计正确。
+
+板端热验证（先证实再改代码）
+----------------------------
+把 /boot/uEnv/uEnv.txt 的 size 改成 0x2000、并把文件补齐到正好 8192 字节
+（避免 memcpy 读到 8KB 之后的 DRAM 垃圾），重启后：
+
+  imx415 4-001a: driver version: 00.01.08
+  imx415 4-001a: Detected imx415 id 0000e0
+  rockchip-csi2-dphy csi2-dphy1: dphy1 matches m01_b_imx415 4-001a
+  rkcif-mipi-lvds1: Async subdev notifier completed
+  rkisp-vir1: Async subdev notifier completed
+
+DT 里 csi2-dphy1 / rkcif-mipi-lvds1 / rkisp-vir1 / rkvpss-vir1 全为 okay，
+/dev/video* 出现；而 alpha2 的串口日志里 imx415 一次都没出现过。
+
+本版改动
+--------
+1. scripts/configs/common/boot.cmd
+   - load uEnv.txt 后 setenv uenv_size ${filesize}（fs/fs.c:505 是 env_set_hex，
+     无前缀 hex，dtfile 的 simple_strtoul(...,16) 可直接解析）
+   - dtfile 前 setenv size ${uenv_size}，兜底 0x8000（与 env import 上限一致）
+   - 顺手 echo overlays applied, size=${size} 便于排障
+2. scripts/build_boot.sh：dtbo 拷贝补计数断言，0 个就报错退出
+   （原本 `|| true` 会把"一个 dtbo 都没编出来"静默吞掉）
+3. build/check_l3_ui.sh：boot.img 段加 4 项断言（dtbo 数 > 0、boot.cmd 含
+   setenv uenv_size、含 setenv size、boot.scr 里 grep 得到 uenv_size）
+
+构建方式
+--------
+tools/build-image.sh --board lubancat-3 --desktop ukui --stage boot -y
+tools/build-image.sh --board lubancat-3 --desktop ukui --stage image -y -n ...
+只重建 boot.img（含新 boot.scr + 重新生成的 initrd）与打包，rootfs 未变。
+
+已知限制 / 后续
+---------------
+- uEnv 模板里的 cam1 dtoverlay 仍是注释态，要按需手工打开（模板来自内核树）
+- Cat-5 及各板同款隐患：一旦 Image/initrd/分区尺寸变化导致 16MiB 拿不到就会复现；
+  本次修在共用 boot.cmd 里，各板下次构建即受益
+- cmd/dtfile.c 本身仍有"失败返回 0"的问题，本轮未打补丁（改外部 clone 的 u-boot）
+- 摄像头只到"DT 使能 + sensor probe"，rkaiq 3A 参数与具体 sensor 标定未做
