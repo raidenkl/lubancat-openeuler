@@ -5,6 +5,42 @@
 
 镜像命名与 tag 逐字符对应：`<board>_openEuler-24.03-LTS_aarch64_<tag>.img.xz`。
 
+## [Unreleased]（LubanCat-3 桌面版 alpha2：修首启板型识别）
+
+### Fixed
+- **首启板型识别永远失败**：`board-init.sh` 按 IIO 设备 `name` 含 `saradc` 筛选，而驱动是
+  `indio_dev->name = dev_name(&pdev->dev)`，dts 节点为 `adc@2ae00000`，实际值
+  `2ae00000.adc` → 一个都筛不到 → BID 为空 → 落到 `rk3576-lubancat-generic.dtb`。
+  generic dts 没有 `gmac0`/`gmac1` 节点，实机表现是「能启动、能出画面，但没有 eth0」
+- **识别失败被固化**：失败分支同样 `touch /boot/.board_init`，配合 unit 的
+  `ConditionPathExists=!/boot/.board_init`，之后每次启动都跳过、永不重试
+- **主机名不生效**：`firstboot.sh` 硬编码 `BOARD=LubanCat-5`；且 `ConditionFirstBoot=yes`
+  在首启被 board-init 的 `reboot` 打断后永久失效，主机名再也不会被设置
+
+### Changed
+- `board-init.sh` 移到 `scripts/overlay/common/`，**全系共用一份**，识别逻辑照搬厂商
+  `SDK/debian12/overlay/etc/init.d/boot_init.sh`：全 SoC 映射表、10 位/12 位阈值表与
+  `bc` 判定、ch2+ch3（rk3128 用 ch0+ch2）、选型后 `ln -sf` + `touch` + `reboot`；
+  仅剪掉 apt-kerneldeb、userdata/oem、fstab 追加、partlabel 等待、logo、`service lightdm stop`
+- 映射表结构改为「外层按 SoC family 分支、内层只匹配 BID」，顺带修掉 rk3588s 匹配不到
+  `rk3588:xxxx` 的隐患（旧表键是 `"$SOC:$BID"`）
+- `lubancat-board-init.service` 加 `StandardOutput=journal+console`：本镜像 journal 是
+  volatile，首启 `reboot` 前不把输出送到串口就什么都不剩
+- `firstboot.sh` 的板型名改读 `/etc/lubancat/board-name`（board-init 写入，空格转 `-`，
+  兼容厂商表里的 `LubanCat-3 v2`）
+- `lubancat-firstboot.service` 去掉 `ConditionFirstBoot=yes`，改以 marker 做幂等，
+  并 `After=lubancat-board-init.service`
+- `lubancat-3.conf` 两处 install 指向 `overlay/common`；头注释里「不做板型识别/只出
+  headless」的过时说明改掉
+
+### Added
+- `build/board-init-selftest.sh`：8 个用例用假 sysfs 跑真脚本（0000→Cat-3 / 0001→3IO /
+  0100→3-v2 / 表外→generic / 10 位阈值 / rk3588s 0402→5-v2 / 标记存在则跳过 /
+  dtb 缺失则拒绝切换），不需要板子
+- `build/check_l3_ui.sh` 新增 E 段 12 项（含上述 8 个用例）
+- `manifests/lubancat-3-ukui-alpha2-20261125.txt`
+- `docs/troubleshooting.md`：新增「板型识别错 / 主机名不变 / 没有 eth0」一节
+
 ## [Unreleased]（LubanCat-3 桌面版 alpha1）
 
 ### Added

@@ -141,7 +141,11 @@ tools/build-rpms.sh camera-engine-rkaiq-rk3576   # 只构建一个
    `extboot_generic_dtb` / `extboot_generic_uenv`
 3. `scripts/bin/u-boot/<board>/` 放 `u-boot.itb` + `MiniLoaderAll.bin`
    （源码编或从厂商 BSP 取，见 `matrix.tsv` 注释与下节）
-4. `scripts/overlay/<board>/` 按板改 `board-init.sh` 的板型映射
+4. **板型识别不用复制**：`scripts/overlay/common/usr/libexec/lubancat/board-init.sh`
+   全系共用一份，映射表移植自厂商 `debian12/overlay/etc/init.d/boot_init.sh`。
+   新板在表里已有条目就只改 conf 的两行 install 指向 `${ov}/common/...`；
+   表里没有才回去补，补之前先对照厂商原文件。离线验证（不需要板子）：
+   `bash build/board-init-selftest.sh scripts/overlay/common/usr/libexec/lubancat/board-init.sh`
 5. 逐段核对 `POST_BOARD_OVERLAY` 里与 SoC 绑定的部分（libmali G610/G52、
    librknnrt、rkaiq、`/opt/rpms`、ttyS2 屏蔽）
 6. `tools/build-image.sh --list` 确认出现，`--dry-run -V` 确认参数

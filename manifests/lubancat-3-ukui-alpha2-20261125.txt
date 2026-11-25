@@ -1,0 +1,69 @@
+LubanCat-3（RK3576）桌面版 alpha2 —— 修复首启板型识别
+======================================================
+构建时间 : 2026-11-25 03:00–03:44 UTC（构建机 10.255.200.150）
+镜像     : openEuler-24.03-LTS-SP3-LubanCat-3-aarch64-ukui-alpha2-20261125.img.xz
+大小     : 1,893,730,352 B (1.76 GiB)
+sha256   : 1e3e0fbd7e8b28a2da064b09d950b83565893a6751e2512ca04d1813dc2e0899
+rootfs   : UUID 6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01，1965056 块（首启 growfs 扩到盘尾）
+内核     : 6.1.99-rk3576
+boot     : 512 MiB ext2，含 rk-kernel.dtb（指向 dtb/）+ boot.scr + uEnv 7 个变体
+uboot    : 4,194,304 B（= 4 MiB 分区上限）
+
+alpha1 实机暴露的问题
+---------------------
+板子能启动、能出画面，但：
+1. /boot/rk-kernel.dtb 指向 dtb/rk3576-lubancat-generic.dtb —— 通用 dts 没有 gmac0/gmac1
+   节点，所以板上没有 eth0，只能靠串口操作
+2. hostnamectl 仍显示 openEuler，/var/lib/lubancat/ 整个目录不存在
+3. lightdm.service / plymouth-quit.service failed
+
+根因（已确认）
+--------------
+1. board-init 按 `/sys/bus/iio/devices/iio:deviceN/name` 是否含 `saradc` 来选 ADC 设备，
+   而驱动是 `indio_dev->name = dev_name(&pdev->dev)`，dts 节点叫 `adc@2ae00000`，
+   实际值是 `2ae00000.adc` → 永远筛不到 → BID 为空 → 走 generic。
+   厂商 boot_init.sh 是**直接读 iio:device0**，从不看名字，所以全系一直是对的。
+2. 识别失败后仍 touch /boot/.board_init，加上 unit 的
+   `ConditionPathExists=!/boot/.board_init`，把失败永久固化。
+3. firstboot.sh 里 BOARD 硬编码 LubanCat-5；且 firstboot 依赖 ConditionFirstBoot=yes，
+   首启被 board-init 的 reboot 打断后该条件永久失效，主机名再也不会被设置。
+
+本版改动
+--------
+1. board-init 移到 `scripts/overlay/common/`，**全系共用一份**，识别逻辑照搬厂商
+   `SDK/debian12/overlay/etc/init.d/boot_init.sh`：
+   board_info() 全 SoC 映射表、get_index() 的 12/10 位阈值表与 bc 判定、
+   board_id() 的 ch2/ch3（rk3128 用 ch0/ch2）、选型后 ln -sf + touch + reboot
+2. 表结构改为「外层按 SoC family 分支、内层只匹配 BID」，顺带修掉 rk3588s 漏匹配
+   （旧表键是 "$SOC:$BID"，rk3588s 的板匹配不到 rk3588:xxxx）
+3. unit 增加 `StandardOutput=journal+console`：首启 reboot 前，串口上能直接看到
+   BOARD_ID / BOARD_NAME / BOARD_DTB / BOARD_uEnv 四行
+4. 选型成功后写 `/etc/lubancat/board-name`，firstboot 读它拼主机名
+   （空格转 -，兼容厂商表里的 "LubanCat-3 v2"）
+5. firstboot 去掉 `ConditionFirstBoot=yes`，只留 marker 条件；并 `After=lubancat-board-init.service`
+6. 新增 `build/board-init-selftest.sh`：8 个用例用假 sysfs 跑真脚本，不需要板子
+
+镜像级验收
+----------
+build/check_l3_ui.sh → PASS=59 FAIL=0
+（A 板级/启动介质、B 桌面栈、C 图形与驱动、D 基础与首启、E 板型识别）
+E 段新增 12 项，其中 8 项是 board-init 映射表的离线用例：
+0000→Cat-3 / 0001→3IO / 0100→3-v2 / 表外→generic / 10 位阈值 / rk3588s 0402→5-v2 /
+标记存在则跳过 / dtb 缺失则拒绝切换。
+
+构建方式
+--------
+tools/build-image.sh --board lubancat-3 --desktop ukui -y
+  ├─ 宿主：u-boot 源码编（本版 .done 已有 u-boot，跳过）
+  └─ 容器：build.sh（rootfs → gen_rk_update）
+说明：本版只清了 rootfs 断点，boot 阶段（boot.img + initrd）沿用 alpha1 产物。
+两者内容与本次改动无关（board-init/firstboot 不在 initrd 里，boot 分区文件未变）。
+
+已知限制
+--------
+- 未实机验证（matrix 仍 buildable）
+- lightdm 本次一行未改：等 dtb 切回板级后，按计划第六节的命令在板上取证再定位
+- 未迁移 Cat-5 及各板：等 Cat-3 实机通过后，只改 conf 的两行 install 路径即可切换
+- 厂商表的 rk3588 段可能落后于内核树（树里另有 5iob/5iobi/5iof/5io-aibox1），
+  迁移 rk3588 板卡时需逐条核对
+- 摄像头仍只到「3A 可安装/可启动」，dts 里 sensor 未使能

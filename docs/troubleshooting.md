@@ -225,3 +225,75 @@ grep -i swcursor /var/log/Xorg.0.log
 改成常显：`gsettings set org.onboard.auto-show enabled false` 后重新登录。
 
 改完 dconf 系统库需要 `dconf update`（构建时 overlay 阶段已执行）。
+
+## 板型识别错 / 主机名不变 / 没有 eth0
+
+这三个症状通常是一条链：`board-init` 选错 dtb → 落到 `rk3576-lubancat-generic.dtb`
+→ 该 dts **没有 `gmac0`/`gmac1` 节点**（`rk3576.dtsi` 默认 disabled，generic 里也没写）
+→ 板上没有 eth0。同时缺 CSI、sys_led、watchdog、MIPI 屏。
+
+### 先看现场
+
+```sh
+readlink /boot/rk-kernel.dtb      # 期望 dtb/rk3576-lubancat-3.dtb
+readlink /boot/uEnv/uEnv.txt      # 期望 uEnvLubanCat3.txt
+cat /etc/lubancat/board-name      # 期望 LubanCat-3
+ls -l /boot/.board_init           # 存在 = 已识别过，之后不再重试
+```
+
+### 坑 1：IIO 设备名不是 `saradc`
+
+`drivers/iio/adc/rockchip_saradc.c` 里是 `indio_dev->name = dev_name(&pdev->dev)`，
+dts 节点叫 `adc@2ae00000`，所以 `/sys/bus/iio/devices/iio:device0/name` 的值是
+**`2ae00000.adc`**。按 `*saradc*` 去筛设备会永远筛不到 → BID 为空 → 走 generic。
+
+厂商脚本是**直接读 `iio:device0`**、不看名字的：
+
+```sh
+ADC_RAW=$(cat /sys/bus/iio/devices/iio:device0/in_voltage2_raw)
+```
+
+`scripts/overlay/common/usr/libexec/lubancat/board-init.sh` 已按厂商做法实现，
+不要改回按名字匹配。
+
+### 坑 2：`.board_init` 会把失败固化
+
+识别失败也会 `touch /boot/.board_init`，而 unit 的条件是
+`ConditionPathExists=!/boot/.board_init` → 之后每次启动都跳过，不再重试。
+
+要重试：
+
+```sh
+rm -f /boot/.board_init
+systemctl restart lubancat-board-init     # 会改软链并自动重启
+```
+
+### 坑 3：首启日志会被 reboot 清掉
+
+journal 是 volatile，board-init 末尾 `reboot` 一执行，`BOARD_ID` 那几行就没了。
+所以 unit 里加了 `StandardOutput=journal+console`：**开机时盯着串口**就能看到
+
+```
+ADC_voltage_scale:0.439453125
+ADC_CH:2 ADC_RAW:...
+ADC_CH:3 ADC_RAW:...
+SOC_type:rk3576
+BOARD_ID:0000
+BOARD_NAME:LubanCat-3
+BOARD_DTB:rk3576-lubancat-3.dtb
+BOARD_uEnv:uEnvLubanCat3.txt
+```
+
+表里没有的 BID 会打 `Device ID Error !!!` 并落到 generic。
+
+### 映射表在哪儿
+
+`board-init.sh` 的 `board_info()`，全 SoC 一张表。改之前先对照厂商
+`SDK/debian12/overlay/etc/init.d/boot_init.sh`；离线验证不需要板子：
+
+```sh
+bash build/board-init-selftest.sh scripts/overlay/common/usr/libexec/lubancat/board-init.sh
+```
+
+注意厂商表的 rk3588 段可能落后于内核树（树里另有 `5iob`/`5iobi`/`5iof`/`5io-aibox1`
+四个 dtb，厂商只映射到 `5io`/`5ioi`），迁移 rk3588 板卡时逐条核对。

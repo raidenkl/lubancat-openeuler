@@ -96,6 +96,28 @@ ck "内核模块 > 200" "yes" "$([ "$KO" -gt 200 ] && echo yes || echo no)"
 ck "modules.dep 存在" "yes" "$([ -s "$MNT/lib/modules/6.1.99-rk3576/modules.dep" ] && echo yes || echo no)"
 
 echo
+echo "--- E. 板型识别（厂商映射表 + 离线跑真实脚本）---"
+BI=$MNT/usr/libexec/lubancat/board-init.sh
+ck "board-init 存在" "yes" "$([ -f "$BI" ] && echo yes || echo no)"
+ck "board-init 与 overlay/common 一致" "yes" "$(cmp -s "$BI" /work/src/SBC-sig/scripts/overlay/common/usr/libexec/lubancat/board-init.sh && echo yes || echo no)"
+ck "无 name 过滤(旧写法)" "0" "$(grep -c "\*saradc\*" "$BI" 2>/dev/null || true)"
+ckhas "默认直读 iio:device0" "iio:device0" "$(grep -m1 "^IIO_BASE=" "$BI" 2>/dev/null)"
+ckhas "12 位阈值表(厂商原值)" "916 1376 1840 2380 2928 3432 3900 4096" "$(grep -m1 "916 " "$BI" 2>/dev/null)"
+ckhas "10 位阈值表(厂商原值)" "229 344 460 595 732 858 975 1024" "$(grep -m1 "229 " "$BI" 2>/dev/null)"
+ckhas "unit 同时输出到串口" "StandardOutput=journal+console" "$(cat "$MNT/etc/systemd/system/lubancat-board-init.service" 2>/dev/null)"
+ck "firstboot 无 ConditionFirstBoot" "0" "$(grep -c "^ConditionFirstBoot=" "$MNT/etc/systemd/system/lubancat-firstboot.service" 2>/dev/null || true)"
+ckhas "firstboot 排在 board-init 之后" "lubancat-board-init.service" "$(grep "^After=" "$MNT/etc/systemd/system/lubancat-firstboot.service" 2>/dev/null)"
+ck "firstboot 无 LubanCat-5 硬编码" "0" "$(grep -c "BOARD=LubanCat-5" "$MNT/usr/libexec/lubancat/firstboot.sh" 2>/dev/null || true)"
+SEL=/work/src/SBC-sig/build/board-init-selftest.sh
+if [ -f "$SEL" ]; then
+    SELFTOUT=$(bash "$SEL" "$BI" 2>&1)
+    ck "映射表用例 PASS 数" "8" "$(printf "%s\n" "$SELFTOUT" | grep -c "^PASS")"
+    ck "映射表用例 FAIL 数" "0" "$(printf "%s\n" "$SELFTOUT" | grep -c "^FAIL")"
+else
+    ck "board-init-selftest.sh 存在" "yes" "no"
+fi
+
+echo
 echo "================ RESULT: PASS=$PASS FAIL=$FAIL ================"
 [ "$FAIL" -eq 0 ] && echo "全部通过" || echo "有失败项，见上"
 exit $([ "$FAIL" -eq 0 ] && echo 0 || echo 1)
