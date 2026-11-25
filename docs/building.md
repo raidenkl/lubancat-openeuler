@@ -3,6 +3,12 @@
 ## 依赖
 
 - 构建宿主：x86_64，Ubuntu 22.04+（本项目在 20.04 上验证）
+- **宿主侧的 u-boot 编译依赖**（`--uboot-env host`，默认路径）：`python2`、`make`、
+  `gcc`、`bc`、`bison`、`flex`、`dtc`、`cpio`。Ubuntu 22.04 上
+  `apt-get install -y python2 make gcc bc bison flex device-tree-compiler cpio`
+  即可；缺哪一项脚本会在 preflight 里直接点名。
+- 宿主**不需要** root：u-boot 编译不 mount、不 chroot。反过来，任何需要
+  mount/chroot 的阶段（rootfs、initrd、打包）一律在容器里跑。
 - 容器：`openeuler/openeuler:24.03-lts-sp3`（`dnf` 装包与 rpmbuild 都在容器内完成）
 - 磁盘：≥ 120 GB 空闲（`scripts/build/` 单次构建可占 30–40 GB）
 - 网络：首次需拉源码仓与 openEuler 源；离线构建见下文
@@ -33,9 +39,37 @@ tools/build-image.sh --board lubancat-5 --desktop none -y      # 无桌面
 tools/build-image.sh --board lubancat-5 --dry-run -V           # 只打印将执行的命令
 
 # 分步
+tools/build-image.sh --board lubancat-3 --stage uboot -y       # 只编 u-boot（宿主编）
+tools/build-image.sh --board lubancat-3 --stage kernel -y      # 只编内核 + boot.img
 tools/build-image.sh --board lubancat-5 --stage boot -y
 tools/build-image.sh --board lubancat-5 --stage image -y       # 改 overlay 后只重打包
 ```
+
+**宿主 / 容器分工**（v0.7 起）：
+
+| 阶段 | 在哪跑 | 原因 |
+| --- | --- | --- |
+| u-boot 源码编 | **宿主**（`--uboot-env host`，默认） | Rockchip 的 `make.sh` 固定 `PYTHON=python2`，容器（openEuler 24.03）没有 python2；宿主原生 2.7 |
+| 内核 + boot.img | 容器 | 需要 initrd（chroot 进 aarch64 rootfs） |
+| rootfs / 打包 | 容器 | 需要 root、mount、loop |
+
+`--uboot-env container` 保留给「已在容器里装好 python2」或只想用预编译 u-boot 的场合。
+预编译路线（`build_uboot_from_src=0`）完全不受影响。
+
+**u-boot 源码编的两个硬约束**（否则编出来的 u-boot 开不了机）：
+
+1. `rk3576_defconfig` 等 Rockchip defconfig **都没有** `CONFIG_CMD_EXT4/CMD_FS_GENERIC/
+   CMD_PART/EFI_PARTITION`，Kconfig 里也没有默认值。本项目用
+   `scripts/configs/u-boot/distro-boot.config` 这份 fragment 在 defconfig 之后叠加
+   （`make <defconfig> <frag>` + `olddefconfig`），缺了就是 `Unknown command 'load'`，
+   读不到 `boot.scr`。
+2. **不能给 `make.sh` 传板名**——它会重跑 `make <board>_defconfig` 把 fragment 冲掉。
+   正确姿势是先 `make defconfig + fragment`，再 `./make.sh`（不带板名，用现有 `.config`），
+   最后 `./make.sh loader` 生成 loader。
+
+u-boot 用 EVB 的 u-boot 设备树（`rk3576_defconfig`）是**正确**的：extboot 方式下
+内核 DTB 由 `boot.scr` 自己加载，u-boot 的 DT 只服务它自己的驱动，而
+`arch/arm/dts/rk3576-u-boot.dtsi` 已在 SoC 级配好 `&sdhci`（8bit/HS400）。
 
 要点：
 
@@ -81,6 +115,22 @@ cd scripts && sudo bash gen_rk_update.sh -n <镜像名> -b lubancat-5
 
 注意：`rootfs.img` 若被残留 loop 挂载占用，第二次挂载会变成只读并导致打包失败
 （`source write-protected`）。打包前先 `mount | grep rootfs` 清理。
+
+## 构建预置 rpm（rkaiq 3A）
+
+`scripts/bin/rpms/<soc>/*.rpm` 是**构建产物**（不入 git），由 `pkg/SPECS` + `pkg/SOURCES`
+在容器里 rpmbuild 出来。新克隆第一次出镜像前跑一次：
+
+```bash
+tools/build-rpms.sh --list                 # 看会构建哪些包、落到哪个 SoC 目录
+tools/build-rpms.sh                        # 全部构建
+tools/build-rpms.sh camera-engine-rkaiq-rk3576   # 只构建一个
+```
+
+- 输出：`scripts/bin/rpms/rk3576/`（ISP v39，12 个 iqfiles）与
+  `scripts/bin/rpms/rk3588/`（ISP v30，14 个 iqfiles），供 conf 预置到镜像 `/opt/rpms`
+- 交叉打包靠 `pkg/rpmrc-aarch64` 里的 `buildarch_compat: x86_64: aarch64`
+  （没有这行，x86_64 容器会报 `No compatible architectures found for build`）
 
 ## 新增一块板卡
 

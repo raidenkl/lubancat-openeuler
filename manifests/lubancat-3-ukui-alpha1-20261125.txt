@@ -1,0 +1,46 @@
+LubanCat-3（RK3576）openEuler 桌面版 —— alpha1 构建记录
+========================================================
+
+镜像
+----
+文件名 : openEuler-24.03-LTS-SP3-LubanCat-3-aarch64-ukui-alpha1-20261125.img.xz
+大小   : 1,893,310,592 B (1.76 GiB)
+sha256 : 75ad70384eb9768af9f776a1f11b6f4c4991555508092c0bf9c655dd831e6ec9
+rootfs : UUID 6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01，1954304 块（7.45 GiB，首启 growfs 扩到盘尾）
+内核   : 6.1.99-rk3576，252 个 .ko
+boot   : 512 MiB ext2，含 rk-kernel.dtb（指向 dtb/）+ boot.scr + uEnv 7 个变体
+uboot  : 4,194,304 B（= 4 MiB 分区上限，gen 用 -le 校验）
+
+与上一版（headless alpha1）的差异
+--------------------------------
+1. u-boot 改为**宿主源码编**：rk3576_defconfig + scripts/configs/u-boot/distro-boot.config
+   （补 CMD_EXT4/CMD_EXT2/CMD_FAT/CMD_FS_GENERIC/CMD_PART/EFI/DOS_PARTITION 七个符号），
+   uboot.img 正好 4 MiB，loader 头推导 3576，u-boot.bin 内含 ext4load/ext2load/fatload。
+   容器只负责 rootfs/initrd/打包（宿主无 sudo，不能 mount/chroot）。
+2. GPU：libmali **Mali-G52 g13p0**（43,360,592 B）+ 6 个装订桩 + hook，
+   不带 mali_csffw.bin（G52 不需要）；三条铁律保持：无 profile.d/mali.sh、
+   ld.so.conf.d 无 mali、不设全局 LD_LIBRARY_PATH；GPU 经 mali-env 按需启用。
+3. NPU：librknnrt.so（2.3.0，strings 含 RK3576）
+4. 硬解：librga.so.2.1.0 + librockchip_mpp.so.0 + gst 插件（libgstrockchipmpp / libgstrkximage）+ udev 规则
+5. 摄像头 3A：预置 rk3576 版 rpm（ISP v39，12 个 iqfiles）到 /opt/rpms，
+   与 rk3588 版分目录（bin/rpms/rk3576 与 rk3588），避免通配串包
+6. 桌面栈：ukui + lightdm(autologin) + onboard + 软件光标 + Adwaita 光标补全 + dconf
+7. 板型识别：lubancat-board-init.service 读 SARADC ch2/ch3 → BID → dtb/uEnv
+   映射（0000→Cat-3、0001→3IO、0100→3-V2，来自厂商 board-table）
+
+构建方式
+--------
+tools/build-image.sh --board lubancat-3 --desktop ukui -y
+  ├─ 宿主：scripts/build_u-boot.sh --board lubancat-3（make.sh 源码编）
+  └─ 容器：build.sh（boot → rootfs → gen_rk_update）
+
+镜像级验收：build/check_l3_ui.sh → PASS=47 FAIL=0
+（A 板级/启动介质、B 桌面栈、C 图形与驱动、D 基础与首启四段）
+
+已知限制
+--------
+- 未实机验证（matrix 仍为 buildable，刷机验收后才置 verified）
+- 摄像头只到「3A 可安装/可启动」，dts 里的 sensor 仍 disabled（-csi.dtsi 74 处）
+- u-boot 用 EVB 设备树（rk3576_defconfig）：extboot 下内核 DT 由 boot.scr 加载，
+  EVB DT 只影响 u-boot 自身驱动；eMMC 能力来自 rk3576-u-boot.dtsi 的 &sdhci
+- 板型识别默认 dtb 为 rk3576-lubancat-3，实机若为 V2/IO 由 board-init 自动切换

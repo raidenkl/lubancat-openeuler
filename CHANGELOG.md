@@ -5,6 +5,40 @@
 
 镜像命名与 tag 逐字符对应：`<board>_openEuler-24.03-LTS_aarch64_<tag>.img.xz`。
 
+## [Unreleased]（LubanCat-3 桌面版 alpha1）
+
+### Added
+- **LubanCat-3（RK3576）桌面版**：ukui + lightdm(autologin) + onboard + 软件光标，
+  镜像 1.76 GiB，镜像级验收 47 项全过（`build/check_l3_ui.sh`）
+- **GPU**：libmali Mali-G52 g13p0（43.4 MB）+ 6 装订桩 + hook；不带 `mali_csffw.bin`
+  （G52 不需要）；仍走 `mali-env` 按需启用，不污染全局 ld 路径
+- **NPU / 硬解**：librknnrt 2.3.0（支持 RK3576）、librga 2.1.0、librockchip_mpp、
+  gst rockchip 插件、udev 权限规则
+- **摄像头 3A（rk3576 版）**：`pkg/SPECS/camera-engine-rkaiq-rk3576.spec`（ISP v39，
+  12 个 iqfiles），预置到 `/opt/rpms`；`bin/rpms/{rk3576,rk3588}/` 分目录避免通配串包
+- **SARADC 板型识别**：`overlay/lubancat-3/board-init.sh`，BID 0000→Cat-3、
+  0001→3IO、0100→3-V2（映射来源厂商 board-table），阈值表与映射表分离便于回填
+- **u-boot 宿主源码编**：`tools/build-image.sh --stage uboot`（默认 `--uboot-env host`），
+  `rk3576_defconfig` + `scripts/configs/u-boot/distro-boot.config` fragment；
+  产物 `uboot.img` 4 MiB、loader 头推导 3576、二进制内含 `ext4load`
+- **`tools/build-rpms.sh`**：从 `pkg/SPECS` + `pkg/SOURCES` 构建 aarch64 rpm，
+  `pkg/rpmrc-aarch64` 增加 `buildarch_compat: x86_64: aarch64`
+- **`--stage kernel`**：只编内核 + boot.img 的快速通道；`LTB_DESKTOP` 打通
+  `--desktop none`（桌面 5 段整体跳过，驱动段仍装）
+
+### Changed
+- `scripts/build_u-boot.sh`：新增 `use_local_u_boot()`（Rockchip `make.sh` 体系，
+  与原先 arm.com v2020.10 路线并存）；修 `:158` 的 `CROSS_COMPILE` 缺 `/bin/`
+- `tools/build-image.sh`：宿主模式先编 u-boot，其余阶段 `docker exec` 进容器；
+  断点标记 `<board>|<包清单文件名>`（不存绝对路径，否则宿主/容器互判为"变了"）
+- `scripts/boards/lubancat-5.conf`：rkaiq 通配改到 `bin/rpms/rk3588/`
+
+### Fixed
+- u-boot `-Werror`（GCC 12 下 `cmd/dtfile.c` 的 `-Werror=address`）→ 统一 `-Wno-error`
+- `make.sh` 传板名会重跑 defconfig 冲掉 fragment → 固定「先 make defconfig+frag，
+  再 `./make.sh` 不带板名」
+- 宿主跑 u-boot 时 `scripts/build/`（容器 root 创建）不可写 → wrapper 自动 chown
+
 ## [Unreleased]（alpha10，未打 tag）
 
 ### Fixed
