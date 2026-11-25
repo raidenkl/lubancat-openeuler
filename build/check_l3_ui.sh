@@ -59,6 +59,10 @@ ck "dconf 已编译(local)" "yes" "$([ -f "$MNT/etc/dconf/db/local" ] && echo ye
 ck "kcminputrc" "yes" "$([ -f "$MNT/etc/xdg/kcminputrc" ] && echo yes || echo no)"
 ckhas "XCURSOR_THEME" "XCURSOR_THEME=Adwaita" "$(cat "$MNT/etc/environment" 2>/dev/null)"
 ckhas "autologin 用户" "autologin-user=lubancat" "$(cat "$MNT/etc/lightdm/lightdm.conf.d/50-autologin.conf" 2>/dev/null)"
+GP=$MNT/etc/X11/xorg.conf.d/10-rockchip-primary.conf
+ck "主 GPU 钉住显示子系统" "yes" "$([ -f "$GP" ] && echo yes || echo no)"
+ckhas "MatchDriver rockchip" 'MatchDriver "rockchip"' "$(cat "$GP" 2>/dev/null)"
+ckhas "PrimaryGPU yes" "PrimaryGPU" "$(cat "$GP" 2>/dev/null)"
 ck "breeze 光标非空" "yes" "$([ -n "$(ls -A "$MNT/usr/share/icons/breeze/cursors" 2>/dev/null)" ] && echo yes || echo no)"
 
 echo

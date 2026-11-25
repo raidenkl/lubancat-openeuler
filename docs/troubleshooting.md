@@ -297,3 +297,73 @@ bash build/board-init-selftest.sh scripts/overlay/common/usr/libexec/lubancat/bo
 
 注意厂商表的 rk3588 段可能落后于内核树（树里另有 `5iob`/`5iobi`/`5iof`/`5io-aibox1`
 四个 dtb，厂商只映射到 `5io`/`5ioi`），迁移 rk3588 板卡时逐条核对。
+
+## 桌面起不来：X 报 `Cannot run in framebuffer mode`
+
+### 症状
+
+`lightdm.service` failed，`journalctl -u lightdm` 只有反复 restart，看不到具体原因。
+真正的错误在 `/var/log/lightdm/x-0.log`（以及 `x-0.log.old`）：
+
+```
+(EE) Fatal server error:
+(EE) Cannot run in framebuffer mode. Please specify busIDs        for all framebuffer devices
+```
+
+### 根因：NPU 的 DRM 设备抢了「主 GPU」
+
+`drivers/rknpu/rknpu_drv.c:862` 无条件 `drm_dev_alloc()`（NPU 要用 GEM 做 dma-buf），
+而 rknpu 比显示子系统 probe 得早，于是两张卡的角色是反的：
+
+```
+/dev/dri/card1 -> 27700000.npu        驱动 RKNPU
+/dev/dri/card0 -> display-subsystem   驱动 rockchip-drm
+```
+
+X 的平台探测把**第一个** DRM 设备当主设备，选中 NPU 后那设备没有 CRTC，直接 Fatal：
+
+```
+(II) xfree86: Adding drm device (/dev/dri/card1)
+(II) xfree86: Adding drm device (/dev/dri/card0)
+(II) no primary bus or device found
+        falling back to /sys/devices/platform/27700000.npu/drm/card1
+(EE) Cannot run in framebuffer mode. Please specify busIDs for all framebuffer devices
+```
+
+注意：`Option "kmsdev" "/dev/dri/card0"` 单独加**不够**（screen 会用 card0，但
+主设备仍是 NPU，`xf86BusConfig` 阶段照样 Fatal）。必须用 `OutputClass` 改主设备。
+
+### 修法
+
+`/etc/X11/xorg.conf.d/10-rockchip-primary.conf`（与厂商 SDK 的
+`debian12/overlay/etc/X11/xorg.conf.d/20-modesetting.conf` 同源）：
+
+```ini
+Section "OutputClass"
+    Identifier  "RockchipDRM"
+    MatchDriver "rockchip"
+    Option      "PrimaryGPU"     "yes"
+EndSection
+```
+
+`MatchDriver` 匹配的是内核 DRM 驱动名 `rockchip_drm_driver.name = "rockchip"`，
+NPU 那份是 `rknpu`，所以只会匹配到显示子系统。
+
+### 两分钟定位
+
+```sh
+readlink -f /sys/class/drm/card*/device/driver   # 哪张是 rockchip-drm
+grep -n "falling back to" /var/log/Xorg.*.log    # 出现 npu 就是这个问题
+ls /etc/X11/xorg.conf.d/                         # 有没有 OutputClass + PrimaryGPU
+```
+
+改完不用重启：`systemctl restart lightdm`，起来后应能看到
+`(II) modeset(0): Output HDMI-1 connected` 与 `Setting screen physical size`。
+
+### 两个容易误判的点
+
+1. 开机时 HDMI 未连接，内核会打 `[drm] Cannot find any crtc or sizes`。这**不是**致命项，
+   插上屏后热插拔会重新 modeset。真正致命的是主设备选错。
+2. 在串口上手工跑 `Xorg :1` 会看到
+   `logind integration requires -keeptty and -keeptty was not provided`，
+   那是手工调试产物；lightdm 拉起的 X 不受影响，别顺着这条去改 `-keeptty`。

@@ -5,6 +5,29 @@
 
 镜像命名与 tag 逐字符对应：`<board>_openEuler-24.03-LTS_aarch64_<tag>.img.xz`。
 
+## [Unreleased]（LubanCat-3 桌面版 alpha3：修 X 主 GPU 选择）
+
+### Fixed
+- **桌面起不来，X 在 probe 阶段就 Abort**：`/var/log/lightdm/x-0.log` 里是
+  `Cannot run in framebuffer mode. Please specify busIDs for all framebuffer devices`。
+  根因是 RKNPU 也注册了一个 DRM 设备（`drivers/rknpu/rknpu_drv.c:862` 的 `drm_dev_alloc`，
+  NPU 要用 GEM 做 dma-buf），且比显示子系统 probe 得早：`card1` 归 NPU、`card0` 才是
+  rockchip-drm。X 的平台探测把第一个 DRM 设备当主设备，选中 NPU 后没有 CRTC，直接 Fatal
+- `plymouth-quit.service` 的 failed 是 lightdm 的 `OnFailure=` 连带，随之一并消失
+- 只加 `Option "kmsdev" "/dev/dri/card0"` 不够（主设备仍是 NPU，照样 Fatal），
+  必须用 `OutputClass` 改主设备
+
+### Added
+- `scripts/overlay/common/etc/X11/xorg.conf.d/10-rockchip-primary.conf`：
+  `OutputClass` + `MatchDriver "rockchip"` + `PrimaryGPU yes`，把显示子系统钉成主 GPU
+  （与厂商 `debian12/overlay/etc/X11/xorg.conf.d/20-modesetting.conf` 同源）
+- `check_l3_ui.sh` B 段加 3 项断言（文件存在 / MatchDriver / PrimaryGPU）
+- `manifests/lubancat-3-ukui-alpha3-20261125.txt`
+- `docs/troubleshooting.md`：新增「桌面起不来：X 报 Cannot run in framebuffer mode」
+
+### Changed
+- `lubancat-3.conf` / `lubancat-5.conf` 桌面段各补一条 install
+
 ## [Unreleased]（LubanCat-3 桌面版 alpha2：修首启板型识别）
 
 ### Fixed

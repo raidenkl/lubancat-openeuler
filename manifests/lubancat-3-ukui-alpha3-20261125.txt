@@ -1,0 +1,72 @@
+LubanCat-3（RK3576）桌面版 alpha3 —— 修 X 主 GPU 选择（桌面真正可用）
+=====================================================================
+镜像     : openEuler-24.03-LTS-SP3-LubanCat-3-aarch64-ukui-alpha3-20261125.img.xz
+大小     : 1,903,778,060 B (1.77 GiB)
+sha256   : 3eca0e86fe105099f7f68a788cf5828470cb36342782a1c2467fa296c1d43edd
+rootfs   : UUID 6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01，1965056 块（首启 growfs 扩到盘尾）
+内核     : 6.1.99-rk3576
+
+alpha2 实机结论（板卡 192.168.103.147，Cat-3 V2）
+------------------------------------------------
+1. 板型识别已正常：
+   hostname = LubanCat-3-v2-ed3e1e
+   /etc/lubancat/board-name = "LubanCat-3 v2"
+   /boot/rk-kernel.dtb      -> dtb/rk3576-lubancat-3-v2.dtb
+   /boot/uEnv/uEnv.txt      -> uEnvLubanCat3-V2.txt
+   model = EmbedFire LubanCat-3-v2，compatible = embedfire,rk3576-lubancat-3-v2
+   BID 识别为 0100 → V2，与实物一致
+2. 网口已回来：end0 = 192.168.103.147/24（generic dtb 下没有 gmac，之前只能串口）
+3. firstboot 正常：machine-id/hostname/ssh-key 均已生效
+4. lightdm 仍 failed —— 本轮修的就是它
+
+lightdm 根因（已实测确认）
+--------------------------
+/var/log/lightdm/x-0.log：
+  (EE) Cannot run in framebuffer mode. Please specify busIDs for all framebuffer devices
+
+X 自己的日志把原因写得很清楚：
+  (II) xfree86: Adding drm device (/dev/dri/card1)
+  (II) xfree86: Adding drm device (/dev/dri/card0)
+  (II) no primary bus or device found
+          falling back to /sys/devices/platform/27700000.npu/drm/card1
+
+card1 是 RKNPU（drivers/rknpu/rknpu_drv.c:862 无条件 drm_dev_alloc，NPU 要用 GEM
+做 dma-buf），card0 才是 rockchip-drm。NPU 比显示子系统 probe 得早，X 的平台探测
+取第一个 DRM 设备当主设备 → 选中 NPU → 没有 CRTC → Fatal → lightdm 反复重启后
+start-limit-hit；plymouth-quit 的 failed 是 lightdm 的 OnFailure= 连带。
+
+单独加 Option "kmsdev" "/dev/dri/card0" 不够（screen 用 card0，但主设备仍是 NPU，
+xf86BusConfig 阶段照样 Fatal）。必须用 OutputClass 改主设备。
+
+本版改动
+--------
+1. 新增 overlay/common/etc/X11/xorg.conf.d/10-rockchip-primary.conf：
+     Section "OutputClass"
+         Identifier  "RockchipDRM"
+         MatchDriver "rockchip"
+         Option      "PrimaryGPU"     "yes"
+     EndSection
+   MatchDriver 匹配 rockchip_drm_driver.name = "rockchip"，NPU 是 rknpu，只匹配显示子系统。
+   与厂商 debian12/overlay/etc/X11/xorg.conf.d/20-modesetting.conf 同源。
+2. lubancat-3.conf / lubancat-5.conf 桌面段各补一条 install
+3. check_l3_ui.sh B 段加 3 项断言（文件存在 / MatchDriver / PrimaryGPU）
+
+实机验证（alpha2 上手工落地同一份配置后）
+----------------------------------------
+- Xorg：modeset(0): Output HDMI-1 connected；Setting screen physical size to 508 x 285
+- lightdm：active (running)
+- 会话：c21 1000 lubancat seat0 tty1 active
+- 进程：ukui-session / ukui-kwin_x11 / ukui-panel / peony-qt-desktop 均在跑
+- systemctl --failed：0 loaded units（plymouth-quit 也随 lightdm 修好而消失）
+
+构建方式
+--------
+tools/build-image.sh --board lubancat-3 --desktop ukui -y
+只重建 rootfs（overlay 变更）；u-boot 与 boot.img/initrd 沿用 alpha2，未变。
+
+已知限制
+--------
+- 开机时若 HDMI 未连接，X 仍会失败（无输出设备）。插上屏后需 systemctl restart lightdm；
+  厂商配置同样如此，本轮未做热插拔自动恢复
+- 未迁移 Cat-5 及其余板卡
+- 摄像头仍只到「3A 可安装/可启动」，dts 里 sensor 未使能
