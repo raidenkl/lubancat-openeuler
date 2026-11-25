@@ -20,7 +20,7 @@
 # family	board	kern_defconfig	kern_branch	status	note
 rk3588	lubancat-5	lubancat_linux_rk3588_defconfig	lbc-develop-6.1	verified	alpha10 实机通过（ukui + headless 待补）
 rk3588	lubancat-4	lubancat_linux_rk3588_defconfig	lbc-develop-6.1	blocked:conf,uboot	RK3588S；soc_name 写 rk3588，dtb 用 rk3588s-lubancat-4
-rk3576	lubancat-3	lubancat_linux_rk3576_defconfig	lbc-develop-6.1	buildable	实机通过：板型/网口/主机名/X桌面/overlay(imx415 已识别)；alpha4 待刷机复核
+rk3576	lubancat-3	lubancat_linux_rk3576_defconfig	lbc-develop-6.1	buildable	实机通过：板型/网口/主机名/X桌面/overlay/NPU 299fps/VPU 109fps/摄像头取帧；GPU EGL 待查
 rk356x	lubancat-2	lubancat_linux_rk356x_defconfig	lbc-develop-6.1	blocked:conf,uboot	RK3568；soc_name 写 rk356x
 rk356x	lubancat-1	lubancat_linux_rk356x_defconfig	lbc-develop-6.1	blocked:conf,uboot	RK3566；ubootconfig 用 rk3566.config（fragment）
 rk356x	lubancat-0	lubancat_linux_rk356x_defconfig	lbc-develop-6.1	blocked:conf,uboot	需实机标定 SARADC 板型映射

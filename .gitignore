@@ -23,6 +23,8 @@
 /build/**
 !/build/*.sh
 !/build/*.spec
+# 板端测试程序（npu-smoke.c）
+!/build/*.c
 /build/**/*.img
 /build/**/*.img.*
 

@@ -5,6 +5,34 @@
 
 镜像命名与 tag 逐字符对应：`<board>_openEuler-24.03-LTS_aarch64_<tag>.img.xz`。
 
+## [Unreleased]（Cat-3 外设验证：手册 + 一键脚本）
+
+### Added
+- `docs/peripheral-verification.md`：GPU / NPU / VPU / RGA / 摄像头 / 音频 / 网络 / USB /
+  存储 / 温度的验证方法，每条固定「验什么 → 命令 → 期望 → 失败含义」，末尾附实测基线
+- `build/check_periph.sh`：板端一键跑，四态 PASS/FAIL/SKIP/WARN + 退出码，
+  支持 `--quick`（只查状态）与 `--stress`（NPU 1000 次看温升）
+- `build/npu-smoke.c`：最小 NPU 推理自测，只用 `rknn_api.h` + `librknnrt.so`。
+  SDK 的 `rknn_benchmark` 依赖 OpenCV，本镜像没有，所以自写
+- `.gitignore` 放行 `build/*.c`
+
+### Verified（LubanCat-3 V2 / 6.1.99-rk3576）
+- NPU：resnet18 224×224 **3.341 ms / 299.3 fps**（100 次 0 失败），SDK 2.3.0 / driver 0.9.8
+- VPU：1080p H.264 编码 **109.08 fps**、解码 **567.26 fps**，gst `mppvideodec` 到 EOS
+- 摄像头：imx415(cam1) 1080p NV12 取 10 帧 = 29 MB，DT 节点在 i2c4、拓扑在 `media0`
+- 音频：3 张卡，ES8323 (`hw:0`) DMA 正常；HDMI 无 ELD（未接音频 sink，属 WARN）
+- 网络 1000 Mb/s、USB 4 设备、eMMC 三分区、最高温 55 °C
+- `check_periph.sh`：PASS=32 FAIL=0 SKIP=2 WARN=1
+
+### Known
+- **GPU：EGL 起不来**。`mali-env eglinfo`/`es2_info` 在 X11、GBM、Wayland 三平台都
+  `eglInitialize failed`，root 与 lubancat 一致；`ldd libmali` 无缺失依赖、
+  kbase 侧可通信。按「内核 DDK 可高于 mali-so」判断不是 g25p0/g13p0 版本问题，
+  待查方向（X 持 DRM master / 无 DRI2、GBM 句柄、hook 行为）记在文档第 1 节，本轮记 SKIP
+- RGA：无测试工具与头文件，用户态只能开窗看 `rkximagesink`，脚本标 SKIP
+- 摄像头默认不启用：uEnv 模板里 dtoverlay 仍是注释态，要手工打开
+- 音频只验 DMA 通路，有无声音需人耳；PCIe/mSATA、WiFi/蓝牙未覆盖
+
 ## [Unreleased]（LubanCat-3 桌面版 alpha4：修 u-boot overlay 不生效）
 
 ### Fixed
