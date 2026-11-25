@@ -4,6 +4,8 @@ setenv initrd_size 0
 # 1) 读 uEnv.txt（固定路径；板型差异由 board-init 在用户态改这个文件来切换）
 if test -e ${devtype} ${devnum}:${distro_bootpart} /uEnv/uEnv.txt; then
   load ${devtype} ${devnum}:${distro_bootpart} ${env_addr_r} /uEnv/uEnv.txt
+  # 记下真实文件长度：dtfile 会把 env 的 size 当 uEnv.txt 的文本长度，见第 7 步
+  setenv uenv_size ${filesize}
   env import -t ${env_addr_r} 0x8000
 else
   echo [boot.cmd] no /uEnv/uEnv.txt, fallback to extlinux
@@ -43,7 +45,19 @@ if test "${enable_uboot_overlays}" = "1"; then
   # distro boot 只设 devtype/devnum，不会设 dev_bootpart；缺这行会输出 "mmc <NULL>"、
   # 读 dtbo 失败（err -9），随后 fdt_overlay_apply 作用在垃圾数据上触发 SError 复位。
   setenv dev_bootpart ${devnum}:${distro_bootpart}
+
+  # dtfile（cmd/dtfile.c:38-47）把 env 的 size 当成 uEnv.txt 的**文本长度**：
+  # 先 malloc(size+1) 再 memcpy(size) 字节去解析。uEnv 模板里的 size=0x1000000（16MiB）
+  # 一旦拿不到整块连续堆，malloc 就失败；而 dtfile 失败也 return 0（看着像成功），
+  # overlay 会全部静默跳过，串口只留一句 "can't malloc 16777217 bytes"。
+  # 这里改用刚记下的真实文件长度；兜底 0x8000 与上面 env import 的上限一致。
+  setenv size 0x8000
+  if test -n "${uenv_size}"; then
+    setenv size ${uenv_size}
+  fi
+
   dtfile ${fdt_addr_r} ${fdt_over_addr} /uEnv/uEnv.txt ${env_addr_r}
+  echo [boot.cmd] overlays applied, size=${size}
 fi
 
 # 8) 启动

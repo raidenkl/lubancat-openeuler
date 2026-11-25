@@ -279,6 +279,10 @@ mk_extboot() {
     cp arch/arm64/boot/dts/${platform}/${dtb_name}.dtb ${extboot_dir}/rk-kernel.dtb
     cp arch/arm64/boot/dts/${platform}/*.dtb            ${extboot_dir}/dtb/
     cp arch/arm64/boot/dts/${platform}/overlay/*.dtbo   ${extboot_dir}/dtb/overlay/ 2>/dev/null || true
+    # dtbo 是 u-boot dtfile 的输入。原本只有 `|| true`，一个都没编出来时会静默放过，
+    # 直到板子上发现 overlay 没生效（排查成本极高）。这里补计数断言。
+    dtbo_cnt=$(ls ${extboot_dir}/dtb/overlay/*.dtbo 2>/dev/null | wc -l)
+    [ "${dtbo_cnt}" -gt 0 ] || { ERROR "no dtbo under arch/arm64/boot/dts/${platform}/overlay/"; exit 2; }
     popd >/dev/null
 
     # uEnv 展平到 /uEnv/（与 BSP 一致，保证 uEnv.txt 同目录相对软链可用）
