@@ -25,6 +25,13 @@ PROG=$(basename "$0")
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 REPO=$(cd "$(dirname "$SELF")/.." && pwd)
 SBC=$REPO/scripts
+# 运行环境：容器内（/work）还是宿主。宿主模式下 u-boot/内核可走本地编译，
+# 其余需要 root 的阶段（rootfs/initrd/打包）通过 docker exec 回容器执行。
+ORIG_ARGS=("$@")
+IN_CONTAINER=0
+[ -f /.dockerenv ] && IN_CONTAINER=1
+CONTAINER=${LTB_CONTAINER:-oe-lubancat-build}
+CTR_WORKDIR=${LTB_CTR_WORKDIR:-/work/src/SBC-sig}
 MATRIX=$SBC/boards/matrix.tsv
 BUILD_DIR=$SBC/build
 DISTRO_TAG=openEuler-24.03-LTS-SP3
@@ -48,7 +55,9 @@ usage() {
   --pkglist <file>               直接指定包清单文件（覆盖 --desktop）
 
 构建:
-  --stage <all|uboot|boot|rootfs|image>   跑到哪一步（默认 all）
+  --stage <all|uboot|kernel|boot|rootfs|image>
+                                 跑到哪一步（默认 all）；kernel=只编内核+boot.img
+  --uboot-env <host|container>   u-boot 源码编在哪跑（默认 host；容器没有 python2）
   --layout <vendor|gpt>          镜像布局（默认 vendor）
   -n, --name <name>              镜像名（默认自动生成）
   --kernel-branch <branch>       内核分支（默认取 matrix 的 kern_branch）
@@ -81,6 +90,7 @@ DESKTOP=ukui
 PKGLIST=""
 NAME=""
 STAGE=all
+UBOOT_ENV=host
 LAYOUT=vendor
 CLEAN=none
 DO_LIST=0
@@ -110,6 +120,8 @@ while [ "$#" -gt 0 ]; do
         -n|--name)        need_arg "$@"; NAME=$2; shift 2 ;;
         --name=*)         NAME=${1#*=}; shift ;;
         --stage)          need_arg "$@"; STAGE=$2; shift 2 ;;
+        --uboot-env)      need_arg "$@"; UBOOT_ENV=$2; shift 2 ;;
+        --uboot-env=*)    UBOOT_ENV=${1#*=}; shift ;;
         --stage=*)        STAGE=${1#*=}; shift ;;
         --layout)         need_arg "$@"; LAYOUT=$2; shift 2 ;;
         --layout=*)       LAYOUT=${1#*=}; shift ;;
@@ -323,8 +335,12 @@ if [ "$DO_LIST" = 1 ]; then
 fi
 
 case "$STAGE" in
-    all|uboot|boot|rootfs|image) ;;
-    *) die "未知 --stage: $STAGE（可用: all uboot boot rootfs image）" ;;
+    all|uboot|kernel|boot|rootfs|image) ;;
+    *) die "未知 --stage: $STAGE（可用: all uboot kernel boot rootfs image）" ;;
+esac
+case "$UBOOT_ENV" in
+    host|container) ;;
+    *) die "未知 --uboot-env: $UBOOT_ENV（可用: host container）" ;;
 esac
 case "$LAYOUT" in
     vendor|gpt) ;;
@@ -393,6 +409,10 @@ else
             ;;
     esac
 fi
+
+# 传给 conf：POST_BOARD_OVERLAY 里桌面 5 段（图形栈/光标/autologin/swcursor/onboard）
+# 整段包在 if [ "$lbc_desktop" != none ] 里。驱动类（libmali/NPU/多媒体）不受此开关影响。
+export LTB_DESKTOP=$DESKTOP
 
 # 内核分支/源码
 [ -n "$KERNEL_BRANCH" ] || KERNEL_BRANCH=$M_BRANCH
@@ -495,7 +515,7 @@ if [ "$DRY_RUN" = 0 ] && [ "$STAGE" = all ]; then
     mkdir -p "$BUILD_DIR"
     marker=$BUILD_DIR/.ltb_board
     prev=$(cat "$marker" 2>/dev/null || true)
-    cur="$BOARD|$SPEC"
+    cur="$BOARD|$(basename "$SPEC")"   # 只存文件名：宿主与容器的绝对路径不同，存全路径会误判"变了"
     if [ "$prev" != "$cur" ]; then
         info "板卡或包清单变化，清理上次的断点标记"
         rm -f "$BUILD_DIR/.done" "$BUILD_DIR/.param_last" "$BUILD_DIR/boot.img"
@@ -510,6 +530,87 @@ if [ "$DRY_RUN" = 0 ] && [ "$STAGE" = all ]; then
     esac
 fi
 
+# ---------- 宿主模式：本地编 u-boot，其余阶段回容器 ----------
+host_uboot_deps() {
+    local miss=0 t
+    for t in python2 make gcc dtc bison flex bc cpio; do
+        command -v "$t" >/dev/null 2>&1 || { warn "宿主缺 $t（u-boot 源码编需要）"; miss=1; }
+    done
+    [ -x "$BUILD_DIR/openeuler_gcc_arm64le/bin/aarch64-openeuler-linux-gnu-gcc" ] || {
+        warn "缺交叉工具链 $BUILD_DIR/openeuler_gcc_arm64le/bin/（先在建一次容器构建）"; miss=1; }
+    [ -x "$REPO/../rkbin/tools/boot_merger" ] || {
+        warn "缺 $REPO/../rkbin/tools/boot_merger（boot_merger 打包 loader 用）"; miss=1; }
+    return $miss
+}
+
+host_uboot_prepare() {
+    # scripts/build 及其 log/u-boot 子目录由容器创建，属主多为 root；
+    # 宿主需要能删建 build/u-boot 并写 .done，靠容器一次性改归属。
+    local b="$BUILD_DIR"
+    if [ ! -w "$b" ] || [ ! -w "$b/u-boot" ] || [ ! -w "$b/log" ]; then
+        info "修复 build/ 属主（容器内 root → 1000）"
+        docker exec "$CONTAINER" bash -c \
+            "mkdir -p $CTR_WORKDIR/scripts/build/{log,u-boot} && chown -R 1000:1000 $CTR_WORKDIR/scripts/build/{log,u-boot} $CTR_WORKDIR/scripts/build" \
+            || die "无法通过容器修复 build/ 属主"
+    fi
+}
+
+host_uboot_mark() {
+    # .done 由容器维护（root），宿主只读给它看
+    local op=$1
+    case "$op" in
+        clear) docker exec -w "$CTR_WORKDIR" "$CONTAINER" bash -c "sed -i 's/u-boot//g' scripts/build/.done 2>/dev/null || true" ;;
+        add)   docker exec -w "$CTR_WORKDIR" "$CONTAINER" bash -c "grep -q '^u-boot$' scripts/build/.done 2>/dev/null || echo u-boot >> scripts/build/.done" ;;
+    esac
+}
+
+# 断点标记必须在宿主阶段就处理：否则宿主写完 .done 进容器后，
+# 容器的「板卡/包清单变化」清理会把 .done 删掉，导致 build.sh 重编 u-boot
+# （而容器没有 python2，直接失败）。
+host_board_marker_reset() {
+    local marker="$BUILD_DIR/.ltb_board" cur prev
+    cur="$BOARD|$(basename "$SPEC")"   # 只存文件名：宿主与容器的绝对路径不同，存全路径会误判"变了"
+    prev=$(cat "$marker" 2>/dev/null || true)
+    [ "$prev" = "$cur" ] && return 0
+    info "板卡或包清单变化，清理上次断点（宿主阶段）"
+    docker exec -w "$CTR_WORKDIR" "$CONTAINER" bash -c \
+        "rm -f scripts/build/.done scripts/build/.param_last scripts/build/boot.img; printf '%s\n' '$cur' > scripts/build/.ltb_board" \
+        || die "无法通过容器清理断点"
+}
+
+stage_uboot_host() {
+    host_uboot_deps || die "宿主依赖不足，或改用 --uboot-env container"
+    host_board_marker_reset
+    host_uboot_prepare
+    host_uboot_mark clear
+    LTB_SKIP_DONE_MARK=1 bash "$SBC/build_u-boot.sh" --board "$BOARD" \
+        || die "宿主 u-boot 构建失败（详见 $BUILD_DIR/log/）"
+    host_uboot_mark add
+    info "u-boot 阶段完成（宿主源码编）"
+}
+
+reexec_in_container() {
+    local args=() a skip=0
+    for a in "${ORIG_ARGS[@]}"; do
+        if [ "$skip" = 1 ]; then skip=0; continue; fi
+        case "$a" in
+            --uboot-env)   skip=1; continue ;;
+            --uboot-env=*) continue ;;
+        esac
+        args+=("$a")
+    done
+    info "→ 其余阶段转入容器执行: $CONTAINER:$CTR_WORKDIR"
+    exec docker exec -w "$CTR_WORKDIR" "$CONTAINER" tools/build-image.sh "${args[@]}" --uboot-env container
+}
+
+# ---------- --stage uboot 且宿主模式：不必走完整确认流程 ----------
+if [ "$IN_CONTAINER" = 0 ] && [ "$STAGE" = uboot ] && [ "$UBOOT_ENV" = host ] && [ "$DRY_RUN" = 0 ]; then
+    stage_uboot_host
+    info ""
+    info "完成: u-boot（宿主源码编，产物在 $BUILD_DIR/u-boot/）"
+    exit 0
+fi
+
 # ---------- 确认 ----------
 if [ "$ASSUME_YES" = 0 ] && [ "$DRY_RUN" = 0 ]; then
     info ""
@@ -519,6 +620,38 @@ if [ "$ASSUME_YES" = 0 ] && [ "$DRY_RUN" = 0 ]; then
     case "$REPLY" in
         y|Y|yes|YES|"") ;;
         *) die "已取消" ;;
+    esac
+fi
+
+if [ "$IN_CONTAINER" = 0 ]; then
+    case "$STAGE" in
+        all)
+            if [ "$UBOOT_ENV" = host ]; then
+                if [ "$DRY_RUN" = 1 ]; then
+                    info "[dry-run] 宿主: bash scripts/build_u-boot.sh --board $BOARD（源码编）"
+                    info "[dry-run] 容器: tools/build-image.sh <其余阶段> --uboot-env container"
+                    exit 0
+                fi
+                stage_uboot_host
+            fi
+            reexec_in_container
+            ;;
+        uboot)
+            if [ "$UBOOT_ENV" = host ]; then
+                if [ "$DRY_RUN" = 1 ]; then
+                    info "[dry-run] 宿主: bash scripts/build_u-boot.sh --board $BOARD（源码编）"
+                    exit 0
+                fi
+                stage_uboot_host
+                info ""
+                info "完成: u-boot（宿主源码编，产物在 $BUILD_DIR/u-boot/）"
+                exit 0
+            fi
+            reexec_in_container
+            ;;
+        *)
+            [ "$DRY_RUN" = 1 ] || reexec_in_container
+            ;;
     esac
 fi
 
@@ -560,7 +693,8 @@ if [ "$DRY_RUN" = 0 ]; then
     mkdir -p "$BUILD_DIR"
     exec 200>"$BUILD_DIR/.ltb.lock"
     flock -n 200 || die "已有构建在运行（$BUILD_DIR/.ltb.lock 被占用）"
-    [ "$(id -u)" = 0 ] || die "需要 root（chroot / mount / loop）"
+    # 容器内才要求 root（rootfs/initrd/loop）；宿主模式由 docker exec 进容器执行这些阶段
+    [ "$IN_CONTAINER" = 0 ] || [ "$(id -u)" = 0 ] || die "容器内需要 root（chroot / mount / loop）"
 fi
 
 case "$STAGE" in
@@ -569,6 +703,7 @@ case "$STAGE" in
     uboot)  stage_sub build_u-boot.sh u-boot ;;
     boot)   stage_sub build_boot.sh boot ;;
     rootfs) stage_sub build_rootfs.sh rootfs ;;
+    kernel) stage_sub build_boot.sh kernel ;;
 esac
 
 info ""
