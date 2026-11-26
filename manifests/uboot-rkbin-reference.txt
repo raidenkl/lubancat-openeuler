@@ -1,2 +1,0 @@
-14:RKBIN_TOOLS=../rkbin/tools
-109:		echo "ERROR: No ../rkbin repository"

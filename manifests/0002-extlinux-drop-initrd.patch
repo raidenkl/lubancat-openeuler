@@ -1,9 +1,0 @@
---- /tmp/ext.orig	2026-11-19 09:04:11.877748500 +0000
-+++ /work/src/SBC-sig/scripts/configs/common/extlinux.conf	2026-11-19 09:04:11.881748552 +0000
-@@ -1,5 +1,4 @@
- label openEuler
-         kernel /Image
--        initrd /initrd.img
-         fdt /DEVICETREE
-         append  BOOTARGS
-\ No newline at end of file

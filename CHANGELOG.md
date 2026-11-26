@@ -5,6 +5,39 @@
 
 镜像命名与 tag 逐字符对应：`<board>_openEuler-24.03-LTS_aarch64_<tag>.img.xz`。
 
+## [Unreleased]（rkaiq 装进镜像并默认自启 + 音频修复适用范围 + 仓库清理）
+
+### Changed
+- **摄像头 3A（rkaiq）装进镜像并默认自启**。原来是"只把 rpm 预置到 `/opt/rpms`、等现场装"，
+  镜像里 `/etc/iqfiles/` 是空的、`rpm -q` 查不到，ISP 拿不到标定参数（出图偏色/发暗）。
+  现在构建期：`chroot ${rootfs_dir} rpm -ivh --nodeps` → `ldconfig` →
+  建 `multi-user.target.wants/rkaiq_3A.service` 链接 → 删掉 rpm 本体（省 1.4 MB）。
+  依赖（/bin/sh、glibc、libdrm、libstdc++、systemd）镜像内均满足，`--nodeps` 只为不吃构建期网络。
+- `lubancat-5.conf` 同步：rkaiq 同样装进镜像并自启；另外补上音频单元
+  （Cat-5 与 Cat-3 是同一颗 ES8388 + 同一套 multicodes）。Cat-5 的 3.5mm 仍受
+  PL330 DMA 故障阻塞，这个单元对它是"必要不充分"。
+
+### Removed（仓库清理：29 个无引用的一次性产物，710 行）
+- `build/`：`apply_overlay_alpha5/6`、`check_a4/a5/a6/a7`、`du_a4`、`fix_a6_rpm`、`gen_a4`
+  ——都是 alpha4~alpha7 期间对挂载 rootfs 做热补丁的一次性脚本
+- `manifests/`：worktree / disk-before-after / file-evidence / environment / commits /
+  docker-image / uboot-boot-flags / sbc-sig-* / generic-full-* / 两个手工 patch /
+  kernel-defconfig-override、source-lock 快照 sha
+- `artifacts/source-lock-20261119T041848Z.tar.gz`（与 manifests 内容重复）
+- **保留**：`alpha*-summary.txt`（docs/release.md 约定要提交）、`lubancat-3-ukui-alpha*.txt`、
+  `source-lock.yaml`（fetch-sources.sh 与 3 篇文档引用）、`tests/test-build-image.sh`
+  （CI 与 docs 引用）、`build/{check_*,board-init-selftest,gpu-bench,npu-smoke}`
+
+### Verified
+- 镜像内实测：`rpm -q camera-engine-rkaiq-rk3576` = `6.9.0-1.lbc5.rk3576`；包内 19 个文件；
+  `/etc/iqfiles` 12 个 json；`multi-user.target.wants/rkaiq_3A.service` 已建；
+  `/opt/rpms` 不再残留 rpm
+- `build/check_l3_ui.sh`：PASS=80 FAIL=0（新增 G 段 5 项 rkaiq 断言）
+
+### 镜像
+`openEuler-24.03-LTS-SP3-LubanCat-3-aarch64-ukui-alpha6-20261126.img.xz`
+1,907,838,780 B / sha256 `4abf46239123c553a35d4fe87dfc3802af1640f8fe289e523c5a9457bef8f319`
+
 ## [Unreleased]（Cat-3：GPU 验证修正 + 3.5mm 耳机无声修复）
 
 ### Fixed

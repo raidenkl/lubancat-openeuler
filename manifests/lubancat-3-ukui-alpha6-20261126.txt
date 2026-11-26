@@ -1,0 +1,43 @@
+# LubanCat-3 / openEuler 24.03 LTS SP3 / ukui — alpha6 构建记录
+
+- 镜像：`openEuler-24.03-LTS-SP3-LubanCat-3-aarch64-ukui-alpha6-20261126.img.xz`
+- 大小：1,907,838,780 B
+- sha256：`4abf46239123c553a35d4fe87dfc3802af1640f8fe289e523c5a9457bef8f319`
+- 构建：`tools/build-image.sh --board lubancat-3 --desktop ukui -y -n ...alpha6-20261126`
+- 只重建 rootfs（`bootimg` 断点保留，boot.img / initrd 与 alpha5 相同）
+- rootfs UUID：`6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01`
+
+## 本次改动
+
+1. 摄像头 3A（rkaiq）装进镜像并默认自启
+   - `lubancat-3.conf`：`/opt/rpms` 预置 → `chroot rpm -ivh --nodeps` 装进 rootfs，
+     `ldconfig` 后建 `multi-user.target.wants/rkaiq_3A.service` 链接，删掉 rpm 本体
+   - `lubancat-5.conf`：同改（rk3588 版）
+2. `lubancat-5.conf` 补音频单元（与 Cat-3 同结构；Cat-5 仍受 PL330 DMA 阻塞）
+3. 仓库清理：删除 29 个无引用的一次性脚本 / 调试转储（710 行）
+4. `check_l3_ui.sh` 新增 G 段 5 项 rkaiq 断言；原来"C. /opt/rpms 恰好 1 个 rpm"
+   的过期断言改成"不留 rpm 本体"
+
+## 验收
+
+### 镜像内容（挂 rkpack rootfs.img 后 chroot 查）
+```
+rpm -q camera-engine-rkaiq-rk3576
+  -> camera-engine-rkaiq-rk3576-6.9.0-1.lbc5.rk3576.aarch64
+rpm -ql ... | wc -l                -> 19
+ls /etc/iqfiles | wc -l            -> 12
+multi-user.target.wants/rkaiq_3A.service -> /usr/lib/systemd/system/rkaiq_3A.service
+/opt/                              -> 只剩 messagebox（/opt/rpms 已清理）
+/usr/bin/rkaiq_3A_server           30072 B
+/usr/lib64/librkaiq.so             1587336 B
+```
+
+### 静态验收
+`check_l3_ui.sh`：**PASS=80 FAIL=0**（A~G 七段；G 段 5 项全过）
+
+## 行为说明（需要知道）
+
+- `rkaiq_3A.service` 默认启用。**没接摄像头时** `rkaiq_3A_server` 找不到 media 拓扑会直接
+  退出，unit 的 `Restart=on-failure` + `StartLimitBurst=5/60s` 会让它重启 5 次后进 failed。
+  这是预期行为，`systemctl --failed` 里看到它不算板子坏；接上摄像头后自动恢复常驻。
+- 不想看到这条 failed：`systemctl disable --now rkaiq_3A.service`。
