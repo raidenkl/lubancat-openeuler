@@ -128,7 +128,11 @@ tools/build-rpms.sh camera-engine-rkaiq-rk3576   # 只构建一个
 ```
 
 - 输出：`scripts/bin/rpms/rk3576/`（ISP v39，12 个 iqfiles）与
-  `scripts/bin/rpms/rk3588/`（ISP v30，14 个 iqfiles），供 conf 预置到镜像 `/opt/rpms`
+  `scripts/bin/rpms/rk3588/`（ISP v30，14 个 iqfiles）。
+- conf 在构建期用 `chroot ${rootfs_dir} rpm -ivh --nodeps /opt/rpms/*.rpm` **直接装进 rootfs**，
+  装完删掉 rpm 本体并建 `multi-user.target.wants/rkaiq_3A.service` 链接（默认自启）；
+  `/opt/rpms` 只在安装失败时留作现场补救
+- 不要退回"只把 rpm 放进 /opt/rpms"：那样镜像里 `/etc/iqfiles/` 是空的，ISP 拿不到标定
 - 交叉打包靠 `pkg/rpmrc-aarch64` 里的 `buildarch_compat: x86_64: aarch64`
   （没有这行，x86_64 容器会报 `No compatible architectures found for build`）
 
@@ -147,7 +151,7 @@ tools/build-rpms.sh camera-engine-rkaiq-rk3576   # 只构建一个
    表里没有才回去补，补之前先对照厂商原文件。离线验证（不需要板子）：
    `bash build/board-init-selftest.sh scripts/overlay/common/usr/libexec/lubancat/board-init.sh`
 5. 逐段核对 `POST_BOARD_OVERLAY` 里与 SoC 绑定的部分（libmali G610/G52、
-   librknnrt、rkaiq、`/opt/rpms`、ttyS2 屏蔽）
+   librknnrt、rkaiq（构建期装进 rootfs）、ttyS2 屏蔽）
 6. `tools/build-image.sh --list` 确认出现，`--dry-run -V` 确认参数
 7. `--stage uboot → boot → rootfs → image` 分段跑，烧写验收后把 `status` 改成 `verified`
 

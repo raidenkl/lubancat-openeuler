@@ -84,8 +84,8 @@ ck "librga.so.2.1.0" "yes" "$([ -f "$MNT/usr/lib64/librga.so.2.1.0" ] && echo ye
 ck "librockchip_mpp.so.0" "yes" "$([ -f "$MNT/usr/lib64/librockchip_mpp.so.0" ] && echo yes || echo no)"
 ck "gst rockchip 插件数" "2" "$(ls "$MNT/usr/lib64/gstreamer-1.0/" 2>/dev/null | grep -cE '^libgst(rockchipmpp|rkximage)\.so$')"
 ck "udev rockchip 规则" "yes" "$([ -f "$MNT/etc/udev/rules.d/99-rockchip-permissions.rules" ] && echo yes || echo no)"
-ck "/opt/rpms 里 rkaiq 恰好 1 个" "1" "$(ls "$MNT/opt/rpms/"camera-engine-rkaiq-*.rpm 2>/dev/null | wc -l)"
-ckhas "预置的是 rk3576 版" "rk3576" "$(ls "$MNT/opt/rpms/" 2>/dev/null | head -1)"
+# rkaiq 现在装进 rootfs 本体，/opt/rpms 不再留 rpm（详见 G 段）
+ck "/opt/rpms 不留 rpm 本体" "0" "$(ls "$MNT/opt/rpms/"camera-engine-rkaiq-*.rpm 2>/dev/null | wc -l)"
 
 echo
 echo "--- D. 基础与首启 ---"
@@ -139,6 +139,16 @@ ckhas "排在 alsa 恢复之后" "alsa-state.service" "$(grep "^After=" "$AU" 2>
 ckhas "排在 lightdm 之后" "lightdm.service" "$(grep "^After=" "$AU" 2>/dev/null)"
 ck "已 enable 到 multi-user" "yes" "$([ -L "$MNT/etc/systemd/system/multi-user.target.wants/lubancat-audio-mixer.service" ] && echo yes || echo no)"
 ck "与 overlay/common 一致" "yes" "$(cmp -s "$AI" /work/src/SBC-sig/scripts/overlay/common/usr/libexec/lubancat/audio-init.sh && echo yes || echo no)"
+
+echo
+echo "--- G. 摄像头 3A（rkaiq 要装进镜像，不能只放 /opt/rpms）---"
+ck "rkaiq_3A_server 存在" "yes" "$([ -x "$MNT/usr/bin/rkaiq_3A_server" ] && echo yes || echo no)"
+ck "iqfiles >= 10" "yes" "$([ "$(ls "$MNT/etc/iqfiles" 2>/dev/null | wc -l)" -ge 10 ] && echo yes || echo no)"
+printf '  info %-36s %s\n' "iqfiles 数量" "$(ls "$MNT/etc/iqfiles" 2>/dev/null | wc -l)"
+ck "librkaiq 已安装" "yes" "$(ls "$MNT"/usr/lib64/librkaiq.so* >/dev/null 2>&1 && echo yes || echo no)"
+ck "不再残留 rpm 本体" "0" "$(ls "$MNT"/opt/rpms/*.rpm 2>/dev/null | wc -l)"
+# 默认启用：没接摄像头时 rkaiq_3A_server 会退出并在 5 次后进 failed，属预期
+ck "rkaiq_3A 默认已启用" "yes" "$([ -L "$MNT/etc/systemd/system/multi-user.target.wants/rkaiq_3A.service" ] && echo yes || echo no)"
 
 echo
 echo "================ RESULT: PASS=$PASS FAIL=$FAIL ================"

@@ -69,7 +69,8 @@ build/              本地构建辅助脚本（产物不入库）
   （RK3588+RK3588S、RK3566+RK3568）。
 - 本工程自行生成 `parameter.txt`（boot 分区 256 MiB），**严禁与原厂 parameter 交叉烧写**。
 - 桌面走 mesa/llvmpipe 软件渲染；需要 GPU 的应用用 `mali-env` 启动。
-- 摄像头 3A（rkaiq）以 RPM 形式预置在 `/opt/rpms/`，需手动 `dnf install`。
+- 摄像头 3A（rkaiq）已装进镜像本体（`rkaiq_3A_server` + `/etc/iqfiles/`），
+  `rkaiq_3A.service` 默认启用；没接摄像头时该服务会退出并在 5 次后进 failed，属预期。
 
 ## License
 

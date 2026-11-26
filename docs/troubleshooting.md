@@ -443,3 +443,20 @@ dmesg | grep -iE "imx415|rkcif|rkisp"      # sensor probe / notifier completed
 tr -d '\0' < /proc/device-tree/csi2-dphy1/status; echo   # okay
 ls /dev/video*
 ```
+
+## rkaiq 装了但 /etc/iqfiles 是空的
+
+旧镜像是"只把 rpm 预置到 `/opt/rpms`、没装"，表现为 `ls /etc/iqfiles` 为空、
+`rpm -q camera-engine-rkaiq-rk3576` 查不到，ISP 出图偏色/发暗。两种补救：
+
+```sh
+# 1) 现场装（旧镜像）
+dnf install -y --nogpgcheck /opt/rpms/camera-engine-rkaiq-*.rpm
+
+# 2) 重新出镜像（已修）：conf 里改成构建期 rpm -ivh，装完不留 rpm
+```
+
+装好后确认：`rpm -q camera-engine-rkaiq-rk3576`、`ls /etc/iqfiles | wc -l`（rk3576 是 12）。
+`rkaiq_3A.service` 默认启用。没接摄像头时它会因 media 拓扑缺失退出，5 次后进 failed ——
+`systemctl --failed` 里看到它是预期噪音；接上摄像头（并打开 uEnv 的 dtoverlay）后自动恢复正常。
+确实不用 3A 时：`systemctl disable --now rkaiq_3A.service`。

@@ -286,8 +286,27 @@ ls -l /tmp/cam.nv12                                          # ≈29 MB
 | 取流超时 | ISP 被占用（先 `systemctl stop lightdm`）或链路没配好 |
 | `media-ctl -p` 里 imx415 在 media0 | 正常，它挂在 rkcif 侧；rkisp 是 media1 |
 
-3A：`/usr/bin/rkaiq_3A_server` 与 `/etc/iqfiles/` 下 12 个 sensor 的 json 已随镜像装好
-（`camera-engine-rkaiq-rk3576`），本手册只验「能取到帧」，不做画质与标定。
+3A：`/usr/bin/rkaiq_3A_server` 与 `/etc/iqfiles/` 下 12 个 sensor 的 json **已装进镜像本体**
+（`camera-engine-rkaiq-rk3576`，构建期 `rpm -ivh` 进 rootfs，不再是"只把 rpm 丢在 /opt/rpms"）。
+本手册只验「能取到帧」，不做画质与标定。
+
+`rkaiq_3A.service` **默认启用**（构建期建好 `multi-user.target.wants` 链接），开机即跑。
+
+```sh
+rpm -q camera-engine-rkaiq-rk3576          # 确认已装
+systemctl status rkaiq_3A.service           # active (running)
+systemctl is-enabled rkaiq_3A.service       # enabled
+```
+
+没接摄像头时会怎样：`rkaiq_3A_server` 找不到 media 拓扑直接退出，unit 里
+`Restart=on-failure` + `StartLimitBurst=5/60s`，所以**重启 5 次后进 failed**。
+这是预期噪音，不是板子坏；接上摄像头（并打开 uEnv 的 dtoverlay）后服务会正常常驻。
+不想要这条 failed 时可以：
+
+```sh
+systemctl disable --now rkaiq_3A.service    # 不用 3A 时关掉
+```
+
 
 ---
 
@@ -350,6 +369,24 @@ ES8388 R2 = ff, R4 = c0                  # 数字部分全关、左右 DAC 掉�
 
 **验证**（本机实测）：重启后 `OUT1=on`、`Headphone=on`；插着耳机放音时
 `hp-con = out hi`、`Left DAC/Mixer/LOUT1/Headphone = On`、`R2=00`、`R4=3c`，人耳确认有声。
+
+### 适用范围（这套修复对哪些板有效）
+
+判据是**声卡名 + 通路结构**，不是板名。`audio-init.sh` 按 `/proc/asound/card*/id` 里含
+`es8388` 来找卡，找不到就静默退出，所以接错板也不会误伤。
+
+| 板型（dts） | codec | 声卡名 | 适用性 |
+|---|---|---|---|
+| Cat-3 / 3IO / Cat-3-V2（rk3576） | ES8388（es8323 驱动） | `rockchip-es8388` | ✅ **已接线，实机验证有声** |
+| Cat-5 / 5-V2 / 5iob / 5iof / 5io-aibox1（rk3588） | ES8388 | `rockchip-es8388` | ✅ 结构逐字相同（同为 `Headphone<-LOUT1/ROUT1` + `hp-con` 使能脚），已接线；**但 Cat-5 另有 PL330 DMA 故障，DMA 修好前装上也仍然无声** |
+| Cat-4 / 4IO（rk3588s） | ES8388 | `rockchip-es8388` | ✅ 结构相同，等该板 conf 落地后生效（当前 `matrix.tsv` 是 blocked） |
+| Cat-1HS / Q1IO（rk3528） | ES8388 | `rockchip-es8388` | ⚠️ codec 相同、理应适用，但仓库还没有 rk3528 的 board conf，未接线 |
+| Cat-1 / 1H / 1N / 2 / 2H / 2N（rk356x） | RK809（PMIC 内 codec） | `rockchip-rk809` | ❌ 不适用：没有 `OUT1` 这个输出混音器，声卡名也不匹配，脚本直接跳过 |
+| Cat-0（rk3566） | dts 里无 codec 节点 | — | ❌ 不适用：没有模拟音频输出 |
+
+**结论**：修复对"用 ES8388 + multicodecs 卡"的板型（Cat-3/4/5 全系及其 IO 变体）有效，
+对 RK809 与无 codec 的板型不适用、也不需要。当前只有 Cat-3、Cat-5 两个 conf 装了该单元，
+其余板型加 4 行 install 即可（脚本本身不用改）。
 
 ### 排查这类"看着正常却没声"的顺序
 
@@ -439,6 +476,7 @@ done
 | 耳机插拔检测不稳定 | 待查 | jack 开机首次上报可能误判「未插入」并把 Headphone 引脚关掉，已用「lightdm 之后再断言」绕过；根因在 `rockchip_multicodecs` 的 jack 初始化时序 |
 | PCIe / mSATA、WiFi/蓝牙 | 未覆盖 | Cat-3 无对应硬件或未接模组 |
 | 画质与 3A 标定 | 未做 | 只验「能取到帧」 |
+| 未接摄像头时 rkaiq_3A 进 failed | 预期 | 服务默认启用；无 sensor 时 `rkaiq_3A_server` 退出，5 次后 failed |
 
 ## 11. 不做什么
 
