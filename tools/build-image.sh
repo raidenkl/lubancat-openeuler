@@ -31,7 +31,22 @@ ORIG_ARGS=("$@")
 IN_CONTAINER=0
 [ -f /.dockerenv ] && IN_CONTAINER=1
 CONTAINER=${LTB_CONTAINER:-oe-lubancat-build}
-CTR_WORKDIR=${LTB_CTR_WORKDIR:-/work/src/SBC-sig}
+# 容器内对应的仓库绝对路径。
+#   - LTB_CTR_WORKDIR 优先：老工作区（宿主任意目录挂到 /work/src/SBC-sig）
+#   - 否则从容器挂载表反查「本仓库被挂到容器哪里」：init-env.sh 用 -v "$REPO:$REPO"，
+#     于是容器内外路径一致，克隆到任意目录都能用
+#   - 都拿不到时退回历史默认 /work/src/SBC-sig
+ctr_workdir() {
+    [ -n "${LTB_CTR_WORKDIR:-}" ] && { printf '%s' "$LTB_CTR_WORKDIR"; return; }
+    local hit=""
+    if command -v docker >/dev/null 2>&1; then
+        hit=$(docker inspect "$CONTAINER" \
+                --format '{{range .Mounts}}{{.Source}}|{{.Destination}}{{"\n"}}{{end}}' 2>/dev/null \
+              | awk -F'|' -v s="$REPO" '$1==s {print $2; exit}')
+    fi
+    printf '%s' "${hit:-/work/src/SBC-sig}"
+}
+CTR_WORKDIR=$(ctr_workdir)
 MATRIX=$SBC/boards/matrix.tsv
 BUILD_DIR=$SBC/build
 DISTRO_TAG=openEuler-24.03-LTS-SP3

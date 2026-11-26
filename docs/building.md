@@ -15,6 +15,9 @@
 
 ## 首次准备
 
+> 一键版：`./scripts/init-env.sh`（体检 + 建容器 + 拉源码，幂等）。
+> 下面两节是要它做的事，手工排障时看这里。
+
 ```bash
 ./scripts/fetch-sources.sh            # 按 manifests/source-lock.yaml 拉 5 个仓
 ./scripts/fetch-sources.sh --check    # 仅校验本地 SHA 是否与 lock 一致
