@@ -1,439 +1,218 @@
-# SBC-sig
-
-English | [简体中文](./README.md)
-
-This repository is the main repository of the openEuler SBC (Single-Board Computer) SIG. It provides information related to SBC SIG, build scripts and documentation for openEuler images suitable for development boards such as [Raspberry Pi](https://www.raspberrypi.org/), [Rockchip](https://www.rock-chips.com/), [Allwinner](https://www.allwinnertech.com/), [Amlogic](https://www.amlogic.cn/), [CIX](https://www.cixtech.com/) and [Phytium](https://www.phytium.com.cn/).
-
-<!-- TOC -->
-
-- [SBC-sig](#sbc-sig)
-    - [To Do List](#to-do-list)
-    - [How to collaborate](#how-to-collaborate)
-    - [File description](#file-description)
-    - [How to download latest image](#how-to-download-latest-image)
-        - [Raspberry Pi](#raspberry-pi)
-        - [Rockchip](#rockchip)
-        - [Phytium](#phytium)
-    - [How to build image](#how-to-build-image)
-        - [Prepare the environment](#prepare-the-environment)
-        - [Run the scripts to build image](#run-the-scripts-to-build-image)
-            - [Build on host](#build-on-host)
-            - [Build in a Docker container](#build-in-a-docker-container)
-
-<!-- /TOC -->
-
-## To Do List
-1. Raspberry Pi
-   1. [Migrate openEuler to Raspberry Pi CM4](https://atomgit.com/openeuler/raspberrypi/issues/119)
-2. Rockchip
-   1. [Migrate openEuler 22.09 to RK3399 SoCs](https://atomgit.com/openeuler/rockchip/issues/5)
-   2. [Migrate openEuler 22.03 LTS (Next) to Rockchip SoCs](https://atomgit.com/openeuler/rockchip/issues/20)
-   3. [Migrate openEuler 22.03 LTS (Next) to ITX-3588J SoCs](https://atomgit.com/openeuler/rockchip-kernel/issues/6)
-3. Allwinner
-   1. [Migrate openEuler 5.10 kernel to Allwinner SoCs](https://atomgit.com/openeuler/allwinner-kernel/issues/1)
-
-## How to collaborate
-
-You can get introduction of openEuler SBC SIG from [sig-SBC](https://atomgit.com/openeuler/community/tree/master/sig/sig-SBC).
-
-- Issues: welcome to collaborate with us by creating new issues or reply opened issues. You can get repository list from [sig-SBC](https://atomgit.com/openeuler/community/tree/master/sig/sig-SBC).
-- Join Slack workspace: [openeuler-sbc](https://openeuler-sbc.slack.com)
-  - [Invite link](https://join.slack.com/t/openeuler-sbc/shared_invite/zt-uh95ug4n-yX7a~c7VrTEU64tZlX3Djw)
-- Weekly meeting schedule
-  - Meeting Time: The 1st and 3rd Wednesday of each month, 17:00 - 17:30 UTC+8.
-  - Meeting Link: There are two methods to get the meeting link which will be updated before each meeting.
-    - Log in to the [openEuler Community](https://openeuler.org/) website, then view the booking information of `sig-SBC例会` in the meeting calendar.
-    - Search `openEuler` in mini programs of WeChat, add `OpenAtom openEuler mini program`. Then click `会议` and view the booking information of `sig-SBC例会`.
-  - [Meeting Agenda](https://etherpad.openeuler.org/p/sig-SBC-meetings)
-  - [Meeting Minutes](https://atomgit.com/openeuler/SBC-sig/issues/5)
-- Warmly welcome to submit Pull Requests.
-
-## File description
-
->![](documents/public_sys-resources/icon-note.gif) **NOTE: **   
->- Recommendation: use the latest images provided in the chapter [How to download latest image](#how-to-download-latest-image) of this documentation.
-
-- [documents](./documents/):
-  - [How to contribute](documents/CONTRIBUTING.md)
-  - [Compatibility List](documents/compatibility-list.en.md)
-  - [Raspberry Pi](documents/RaspberryPi.md)
-    - [Getting started with Raspberry Pi](documents/RaspberryPi.md)
-    - [Install openEuler on an SD card](documents/raspberrypi/刷写镜像.md)
-    - [How to use Raspberry Pi](documents/raspberrypi/树莓派使用.md)
-    - [Building openEuler image for Raspberry Pi](documents/raspberrypi/openEuler镜像的构建.md)
-    - [Cross-compile the kernel](documents/raspberrypi/交叉编译内核.md)
-    - [Emulate Raspberry Pi with QEMU](documents/raspberrypi/QEMU启动树莓派.md)
-    - [Hailo AI](documents/raspberrypi/HailoAI.md)
-    - [Deploy OpenClaw on Raspberry Pi](documents/raspberrypi/树莓派部署openclaw.md)
-  - [Rockchip and other SoCs](documents/Rockchip.md)
-    - [Getting started with Rockchip and other SoCs](documents/Rockchip.md)
-    - [Building openEuler image for Rockchip development boards](documents/rockchip/openEuler镜像的构建.md)
-    - [Install an Image on an EMMC](documents/rockchip/刷写EMMC镜像.md)
-    - [Build images sequentially](documents/rockchip/顺序构建.md)
-    - [Compile the kernel of Firefly-RK3399 based on the Firefly SDK](documents/rockchip/基于Firefly-SDK编译Firefly-RK3399的内核镜像.md)
-    - [Packaging ITX-RK3588J Integrated Burn Write Image](documents/rockchip/打包ITX-RK3588J一体化烧写镜像.md)
-    - [Set up SELinux](documents/rockchip/设置SELinux.md)
-    - [Build an image using Docker](documents/rockchip/使用Docker构建镜像.md)
-    - [openEuler Adaptation Guide](documents/rockchip/openEuler适配指南.md)
-    - [Using RKNPU on openEuler](documents/rockchip/在openEuler上使用RKNPU.md)
-    - [Run RKLLM on openEuler](documents/rockchip/在openEuler上运行RKLLM.md)
-- [scripts](./scripts/): Script for building openEuler image
-    - [Build a unified system image](scripts/build.sh)
-    - [Build a unified system image using Docker](./scripts/build-image-docker.sh)
-    - [Build a boot Image](scripts/build_boot.sh)
-    - [Build a rootfs Image](scripts/build_rootfs.sh)
-    - [Compile u-boot](scripts/build_u-boot.sh)
-    - [Generate a bootable image](scripts/gen_image.sh)
-
-## How to download latest image
-
-### Raspberry Pi
-
->![](documents/public_sys-resources/icon-notice.gif) **Note:**   
->Currently, only the openEuler 24.03 LTS SP1/25.03/24.03 LTS SP2/25.09/24.03 LTS SP3/24.03 LTS SP4/26.09 Raspberry Pi images support both Raspberry Pi 5 and Raspberry Pi 3B/3B+/4B/400, while other versions of the Raspberry Pi images only support Raspberry Pi 3B/3B+/4B/400.
-
-Basic information of the images for Raspberry Pi is as follows. [more images](documents/raspberrypi/images.en.md)
-
-<table><thead align="left"><tr>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Version</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>System user(password)</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Release date</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Size</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Kernel version</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Repository of rootfs</strong></p></th>
-</tr></thead>
-<tbody>
-<tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://mirror.iscas.ac.cn/openeuler-sbc-sig/images/raspberrypi/openEuler-26.09-raspi-aarch64-alpha1.img.xz">openEuler 26.09 alpha1</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>openeuler（openEuler12#$）</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/10/14</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>359.9 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>6.6.0-175.0.0.4</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-26.09/generic.repo">openEuler 26.09 repository</a></td>
-</tr>
-<tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://mirror.iscas.ac.cn/openeuler-sbc-sig/images/raspberrypi/openEuler-26.09-UKUI-raspi-aarch64-alpha1.img.xz">openEuler 26.09 alpha1 (UKUI desktop and Chinese input method)</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>openeuler（openEuler12#$）</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/10/14</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>1.7 GiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>6.6.0-175.0.0.4</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-26.09/generic.repo">openEuler 26.09 repository</a></td>
-</tr>
-<tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://mirror.iscas.ac.cn/openeuler-sbc-sig/images/raspberrypi/openEuler-26.09-DDE-raspi-aarch64-alpha1.img.xz">openEuler 26.09 alpha1 (DDE desktop and Chinese input method)</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>openeuler（openEuler12#$）</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/10/14</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>1.3 GiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>6.6.0-175.0.0.4</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-26.09/generic.repo">openEuler 26.09 repository</a></td>
-</tr>
-<tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://mirror.iscas.ac.cn/openeuler-sbc-sig/images/raspberrypi/openEuler-26.09-GNOME-raspi-aarch64-alpha1.img.xz">openEuler 26.09 alpha1 (GNOME desktop and Chinese input method)</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>openeuler（openEuler12#$）</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/10/14</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2.5 GiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>6.6.0-175.0.0.4</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-26.09/generic.repo">openEuler 26.09 repository</a></td>
-</tr>
-<tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://mirror.iscas.ac.cn/openeuler-sbc-sig/images/raspberrypi/openEuler-26.09-DevStation-raspi-aarch64-alpha1.img.xz">openEuler 26.09 alpha1 (DevStation and Chinese input method)</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>openeuler（openEuler12#$）</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/10/14</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>1.6 GiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>6.6.0-175.0.0.4</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-26.09/generic.repo">openEuler 26.09 repository</a></td>
-</tr>
-<tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://repo.openeuler.org/openEuler-26.09/raspi_img/openEuler-26.09-raspi-aarch64.img.xz">openEuler 26.09</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>openeuler（openEuler12#$）</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/09/30</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>325.5 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>6.6.0-175.0.0.4</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-26.09/generic.repo">openEuler 26.09 repository</a></td>
-</tr>
-<tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://mirror.iscas.ac.cn/openeuler-sbc-sig/images/raspberrypi/openEuler-24.03-LTS-SP4-raspi-aarch64-alpha1.img.xz">openEuler 24.03 LTS SP4 alpha1</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>openeuler（openEuler12#$）</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/08/19</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>337.5 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>6.6.0-159.4.9.17</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-24.03-LTS-SP4/generic.repo">openEuler 24.03 LTS SP3 repository</a></td>
-</tr>
-<tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://mirror.iscas.ac.cn/openeuler-sbc-sig/images/raspberrypi/openEuler-24.03-LTS-SP4-UKUI-raspi-aarch64-alpha1.img.xz">openEuler 24.03 LTS SP4 alpha1 (UKUI desktop and Chinese input method)</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>openeuler（openEuler12#$）</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/08/19</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>1.4 GiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>6.6.0-159.4.9.17</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-24.03-LTS-SP4/generic.repo">openEuler 24.03 LTS SP4 repository</a></td>
-</tr>
-<tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://mirror.iscas.ac.cn/openeuler-sbc-sig/images/raspberrypi/openEuler-24.03-LTS-SP4-DDE-raspi-aarch64-alpha1.img.xz">openEuler 24.03 LTS SP4 alpha1 (DDE desktop and Chinese input method)</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>openeuler（openEuler12#$）</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/08/19</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>1.4 GiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>6.6.0-159.4.9.17</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-24.03-LTS-SP4/generic.repo">openEuler 24.03 LTS SP4 repository</a></td>
-</tr>
-<tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://mirror.iscas.ac.cn/openeuler-sbc-sig/images/raspberrypi/openEuler-24.03-LTS-SP4-GNOME-raspi-aarch64-alpha1.img.xz">openEuler 24.03 LTS SP4 alpha1 (GNOME desktop and Chinese input method)</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>openeuler（openEuler12#$）</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/08/19</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2.4 GiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>6.6.0-159.4.9.17</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-24.03-LTS-SP4/generic.repo">openEuler 24.03 LTS SP4 repository</a></td>
-</tr>
-<tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://mirror.iscas.ac.cn/openeuler-sbc-sig/images/raspberrypi/openEuler-24.03-LTS-SP4-DevStation-raspi-aarch64-alpha1.img.xz">openEuler 24.03 LTS SP4 alpha1 (DevStation and Chinese input method)</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>openeuler（openEuler12#$）</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/08/19</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>1.4 GiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>6.6.0-159.4.9.18</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-24.03-LTS-SP4/generic.repo">openEuler 24.03 LTS SP4 repository</a></td>
-</tr>
-<tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://dl-cdn.openeuler.openatom.cn/openEuler-24.03-LTS-SP4/raspi_img/openEuler-24.03-LTS-SP4-raspi-aarch64.img.xz">openEuler 24.03 LTS SP4</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>root（openeuler）</li><li>pi（raspberry）</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/06/30</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>289.8 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>6.6.0-159.4.1.16</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-24.03-LTS-SP4/generic.repo">openEuler 24.03 LTS SP4 repository</a></td>
-</tr>
-</tbody></table>
-
-### Rockchip
-
-Basic information of the image is as follows:
-
-<table><thead align="left"><tr>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Version</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>System User (Password)</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Release Date</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Size</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Kernel Version</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Repository of rootfs</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Image type</strong></p></th>
-</tr></thead>
-<tbody><tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://eulixos.com/repo/others/openeuler-rk3399/openEuler-20.03-LTS-rk3399-firefly-aarch64-alpha1.img.xz">openEuler 20.03 LTS Firefly-RK3399</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>root (openeuler)</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2021/12/20</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>288 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>4.19.90</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://atomgit.com/src-openeuler/openEuler-repos/blob/openEuler-20.03-LTS/generic.repo">openEuler 20.03 LTS repository</a></td>
-<td class="cellrowborder" valign="top" width="10%"><p>A compressed RAW original image</p></td>
-</tr>
-<tbody><tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://eulixos.com/repo/others/openeuler-rk3399/openEuler-20.03-LTS-rk3399-firefly-aarch64-alpha1.tar.gz">openEuler 20.03 LTS Firefly-RK3399</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>root (openeuler)</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2021/12/20</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>493 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>4.19.90</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://atomgit.com/src-openeuler/openEuler-repos/blob/openEuler-20.03-LTS/generic.repo">openEuler 20.03 LTS repository</a></td>
-<td class="cellrowborder" valign="top" width="10%"><p>A compressed image for the EMMC</p></td>
-</tr>
-<tbody><tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://eulixos.com/repo/others/openeuler-rk3399/openEuler-20.03-LTS-RockPi-4A-aarch64-alpha1.img.xz">openEuler 20.03 LTS RockPi-4A</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>root (openeuler)</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2021/12/20</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>295 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>4.19.90</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://atomgit.com/src-openeuler/openEuler-repos/blob/openEuler-20.03-LTS/generic.repo">openEuler 20.03 LTS repository</a></td>
-<td class="cellrowborder" valign="top" width="10%"><p>A compressed RAW original image</p></td>
-</tr>
-<tbody><tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://eulixos.com/repo/others/openeuler-rk3399/openEuler-21.09-Firefly-RK3399-aarch64-alpha1.img.xz">openEuler 21.09 Firefly-RK3399</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>root (openeuler)</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2021/12/20</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>420 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>5.10.0</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://atomgit.com/src-openeuler/openEuler-repos/blob/openEuler-21.09/generic.repo">openEuler 21.09 repository</a></td>
-<td class="cellrowborder" valign="top" width="10%"><p>A compressed RAW original image</p></td>
-</tr>
-<tbody><tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://eulixos.com/repo/others/openeuler-rk3399/openEuler-21.09-Firefly-RK3399-aarch64-alpha1.tar.gz">openEuler 21.09 Firefly-RK3399</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>root (openeuler)</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2021/12/20</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>717 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>5.10.0</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://atomgit.com/src-openeuler/openEuler-repos/blob/openEuler-21.09/generic.repo">openEuler 21.09 repository</a></td>
-<td class="cellrowborder" valign="top" width="10%"><p>A compressed image for the EMMC</p></td>
-</tr>
-<tbody><tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://eulixos.com/repo/others/openeuler-rk3399/openEuler-21.09-RockPi-4A-aarch64-alpha1.img.xz">openEuler 21.09 RockPi-4A</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>root (openeuler)</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2021/12/20</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>717 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>5.10.0</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://atomgit.com/src-openeuler/openEuler-repos/blob/openEuler-21.09/generic.repo">openEuler 21.09 repository</a></td>
-<td class="cellrowborder" valign="top" width="10%"><p>A compressed RAW original image</p></td>
-</tr>
-<tbody><tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://eulixos.com/repo/others/openeuler-rk3588/openEuler-22.03-LTS-ITX-3588J-aarch64-alpha1.img.xz">openEuler 22.03 Firefly ITX-3588J</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>root (openeuler)</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2023/7/11</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>494 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>5.10.0</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-22.03-LTS/generic.repo">openEuler 22.03 repository</a></td>
-<td class="cellrowborder" valign="top" width="10%"><p>A compressed RAW original image</p></td>
-</tr>
-<tbody><tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://eulixos.com/repo/others/openeuler-rk3588/openEuler-22.03-LTS-rk3588-xfce.img.xz">openEuler 22.03 Firefly ITX-3588J + XFCE</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>root (openeuler)</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2023/7/11</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>1.9 GiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>5.10.0</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-22.03-LTS/generic.repo">openEuler 22.03 repository</a></td>
-<td class="cellrowborder" valign="top" width="10%"><p>A compressed RAW original image</p></td>
-</tr>
-<tbody><tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://eulixos.com/repo/others/openeuler-rk3399/openEuler-22.03-LTS-SP3-Firefly-RK3399-aarch64-alpha1.img.xz">openEuler 22.03 LTS SP3 Firefly-RK3399</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>root (openeuler)</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2024/1/23</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>450 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>5.10.0</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://atomgit.com/src-openeuler/openEuler-repos/blob/openEuler-22.03-LTS-SP3/generic.repo">openEuler 22.03 LTS SP3 repository</a></td>
-<td class="cellrowborder" valign="top" width="10%"><p>A compressed RAW original image</p></td>
-</tr>
-</tbody></table>
-
-### Phytium
-
-Basic information of the image is as follows:
-
-<table><thead align="left"><tr>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Version</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>System User (Password)</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Release Date</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Size</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Kernel Version</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Repository of rootfs</strong></p></th>
-<th class="cellrowborder" valign="top" width="10%"><p><strong>Image type</strong></p></th>
-</tr></thead>
-<tbody><tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://mirror.iscas.ac.cn/openeuler-sbc-sig/images/phytium/openEuler-24.03-LTS-SP1-PhytiumPi-4GB-aarch64-alpha3.img.xz">openEuler 24.03 LTS SP1 PhytiumPi 4GB alpha3</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>root (openeuler)</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/10/17</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>828 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>6.6.0<br>(phytium-kernel: <a href="https://atomgit.com/openeuler/phytium-kernel/tree/openEuler-24.03-LTS-SP1-update-20260922">openEuler-24.03-LTS-SP1-update-20260922</a>)</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-24.03-LTS-SP1/generic.repo">openEuler 24.03 LTS SP1 repository</a></td>
-<td class="cellrowborder" valign="top" width="10%"><p>A compressed RAW original image</p></td>
-</tr>
-<tbody><tr>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://mirror.iscas.ac.cn/openeuler-sbc-sig/images/phytium/openEuler-22.03-LTS-SP4-PhytiumPi-4GB-aarch64-alpha2.img.xz">openEuler 22.03 LTS SP4 PhytiumPi 4GB alpha2</a></td>
-<td class="cellrowborder" valign="top" width="10%"><ul><li>root (openeuler)</li></ul></td>
-<td class="cellrowborder" valign="top" width="10%"><p>2026/10/17</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>895 MiB</p></td>
-<td class="cellrowborder" valign="top" width="10%"><p>5.10.0<br>(phytium-kernel: <a href="https://atomgit.com/openeuler/phytium-kernel/tree/openEuler-22.03-LTS-SP4-update-20260911">openEuler-22.03-LTS-SP4-update-20260911</a>)</p></td>
-<td class="cellrowborder" valign="top" width="10%"><a href="https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-22.03-LTS-SP4/generic.repo">openEuler 22.03 LTS SP4 repository</a></td>
-<td class="cellrowborder" valign="top" width="10%"><p>A compressed RAW original image</p></td>
-</tr>
-</tbody></table>
-
-## How to build image
-
-### Prepare the environment
-
-To build openEuler AArch64 image for Raspberry Pi, Rockchip or other SoCs, the requirements of running scripts of this repository are as follows:
-
-- OS: openEuler or CentOS 8
-- Hardware: AArch64 hardware, such as Raspberry Pi, Firefly RK3399, Firefly ROC-RK3588S-PC
-
-For other architecture hardware, you can use [QEMU](https://www.qemu.org/) to build AArch64 system emulation.
-
-### Run the scripts to build image
-You can use the unified build scripts [build.sh](./scripts/build.sh) or [build-image-docker.sh](./scripts/build-image-docker.sh) to build images for Raspberry Pi, Rockchip, and other development boards, either directly on the host machine or by launching a Docker container. For details, please refer to the documentation below:
-- [Build Raspberry Pi images](./documents/RaspberryPi.md#构建镜像)
-- [Build images for Rochchip and other SoCs](./documents/Rockchip.md#镜像构建)
-
-#### Build on host
-Run the following command to build images on the host machine:
-
-`sudo bash build.sh --board BOARD_CONFIG -n NAME -k KERNEL_URL -b KERNEL_BRANCH -c KERNEL_DEFCONFIG -r REPO_INFO -s SPEC --cores N`
-
-After building the image, you can find the image in `build/YYYY-MM-DD` of the directory in which the script resides as shown in the script output.
-
-**NOTE: You can directly execute "sudo bash build.sh" to build an openEuler 20.03 LTS image for Firefly-RK3399 with the script's default parameters.**
-
-**Parameter Descriptions**
-
-1.  --board BOARD_CONFIG
-    The board configuration files are located in the [boards](scripts/boards) directory. See the example file [sample.conf](scripts/boards/sample.conf). The default is `firefly-rk3399`.
-
-    Configuration parameters included:
-    - platform=PLATFORM
-
-        The Hardware platform used by the board. Currently supported platforms are: broadcom, rockchip, phytium. Default is `rockchip`.
-
-    - device-tree=DTB_NAME
-
-        The device name in the kernel device tree (slightly different from the board name). Corresponds to the `DTB_NAME.dts` file under [kernel/arch/arm64/boot/dts/rockchip](https://atomgit.com/openeuler/kernel/tree/master/arch/arm64/boot/dts/rockchip). Default is `rk3399-firefly`.
-
-    - ubootconfig=UBOOT_DEFCONFIG
-
-        The defconfig file name for the development board. Corresponds to the `UBOOT_DEFCONFIG` file under [u-boot/configs](https://github.com/u-boot/u-boot/tree/master/configs). Default is `firefly-rk3399_defconfig`. To use a precompiled u-boot (e.g., on RK3588), set this to empty: ubootconfig=.
-
-2.  -n, --name IMAGE_NAME
-
-    The image name to be built. For example, `openEuler-20.03-LTS-Firefly-RK3399-aarch64-alpha1` or `openEuler-24.03-LTS-raspi-aarch64-alpha1`.
-
-3.  -k, --kernel KERNEL_URL
-
-    The URL of kernel source repository, which defaults to `https://atomgit.com/openeuler/raspberrypi-kernel.git`. You can set the parameter as `git@atomgit.com:openeuler/raspberrypi-kernel.git` or `git@atomgit.com:openeuler/kernel.git` according to the requirement.
-
-4.  -b, --branch KERNEL_BRANCH
-
-    The branch name of kernel source repository, which defaults to openEuler-20.03-LTS.
-
-5.  -c, --config KERNEL_DEFCONFIG
-
-    The filename/path of configuration for compiling kernel, which defaults to `openeuler-raspi_defconfig`. If this parameter is the filename of configuration, please make sure the configuration file in `arch/arm64/configs` of the kernel source or under [scripts/configs/common](./scripts/configs/common/) of this framework.
-
-6.  -r, --repo REPO_INFO
-
-    The URL/path of target repo file, or the list of repositories' baseurls. Note that, the baseurls should be separated by space and enclosed in double quotes.
-    Examples are as follows:
-
-    - The URL of target repo file: `https://raw.atomgit.com/src-openeuler/openEuler-repos/raw/openEuler-20.03-LTS/generic.repo`.
-
-    - The path of target repo file:
-
-        `./openEuler-20.03-LTS.repo`：for building openEuler 20.03 LTS image, refer to <https://atomgit.com/src-openeuler/openEuler-repos/blob/openEuler-20.03-LTS/generic.repo> for details.
-
-    - List of repo's baseurls: `http://repo.openeuler.org/openEuler-20.03-LTS/OS/aarch64/ http://repo.openeuler.org/openEuler-20.03-LTS/EPOL/aarch64/`.
-
-7.  -s, --spec SPEC
-
-    Specify the image version:
-    - `headless`, image without desktop environments.
-    - `xfce`, image with Xfce desktop environment and related software including CJK fonts and IME.
-    - `ukui`, image with UKUI desktop environment and fundamental software including CJK fonts and IME.
-    - `dde`, image with DDE desktop environment and fundamental software including CJK fonts and IME.
-    - `gnome`，image with GNOME desktop environment and fundamental software including CJK fonts and IME.
-    - `devstation`，image with GNOME desktop environment and fundamental software including CJK fonts, IME, development tools and IDEs.
-    - The file path of rpmlist, the file contains a list of the software to be installed in the image, refer to [rpmlist](./scripts/configs/rpmlist) for details.
-
-    The default is `headless`.
-
-8.  --cores N
-
-    The number of parallel compilations, according to the actual number of CPU of the host running the script. The default is the number of processing units available.
-
-9.  -h, --help
-
-    Displays help information.
-
-#### Build in a Docker container
-Run the following command to build an image in a Docker container:
-
-`sudo bash build-image-docker.sh -d DOCKER_FILE --board BOARD_CONFIG -n NAME -k KERNEL_URL -b KERNEL_BRANCH -c KERNEL_DEFCONFIG -r REPO_INFO -s SPEC --cores N`
-
-After building the image, you can find the image in `build/YYYY-MM-DD` of the directory in which the script resides.
-
-Caution, before running the script, you need to install Docker. The script will automatically import the Docker image into the local system according to the script's parameter: DOCKER_FILE.
-
-In addition to the parameter DOCKER_FILE, the other parameters are the same as the corresponding parameters in [Build on host](#build-on-host):
-
-1.  -d, --docker DOCKER_FILE
-
-    The URL/path of the Docker image, which defaults to `https://repo.openeuler.org/openEuler-20.03-LTS-SP1/docker_img/aarch64/openEuler-docker.aarch64.tar.xz`. With the default parameter, the script will automatically download the Docker image of openEuler 20.03 LTS SP1 and import it into the local system.
+# LubanCat openEuler
+
+[简体中文](README.md) | **English**
+
+Build openEuler 24.03 LTS SP3 images for the LubanCat family
+(RK3588 / RK3588S / RK3576 / RK3568 / RK3566). It is based on the openEuler
+SBC-sig build framework and uses Rockchip's vendor flow — `parameter-extboot`
+plus `update.img` (the "vendor" layout).
+
+> Upstream lineage: [openEuler SBC-sig](https://atomgit.com/openeuler/SBC-sig) @ `521f1ae` (MulanPSL-2.0).
+> This is an independent downstream project, not an official openEuler release.
+
+> [!WARNING]
+> **Default credentials**: images built here ship with user `lubancat`, password
+> `lubancat`, passwordless `sudo`, and desktop autologin. That is a convenience
+> setting for **development / evaluation images** — **do not use them in
+> production or on any public network**. After the first login, change the
+> password, remove the NOPASSWD rules under `/etc/sudoers.d/`, and turn off
+> autologin. See [docs/security-notes.md](docs/security-notes.md).
+
+## Board support
+
+**[scripts/boards/matrix.tsv](scripts/boards/matrix.tsv) is the source of truth**;
+the table below is only a summary:
+
+| Board | SoC | Status | How far it has been verified on hardware |
+|---|---|---|---|
+| LubanCat-5 | RK3588 | ✅ Supported | alpha10: UKUI desktop boots; headless not verified separately |
+| LubanCat-3 | RK3576 | ✅ Supported | alpha6 (Cat-3 V2): automatic board detection, gigabit Ethernet, hostname, X desktop, GPU `Mali-G52` (1080p clear ≈1.5 ms/frame, ≈680 fps), 3.5 mm headphone audio, NPU 3.3 ms/inference, VPU 1080p encode 109 fps / decode 567 fps, `imx415` camera capture, rkaiq 3A installed and auto-started |
+| LubanCat-4 | RK3588S | ⏳ Pending | Missing `boards/lubancat-4.conf` and u-boot artifacts (`soc_name` must be `rk3588`) |
+| LubanCat-2 | RK3568 | ⏳ Pending | Missing conf and u-boot; `soc_name` must be `rk356x` |
+| LubanCat-1 | RK3566 | ⏳ Pending | Missing conf and u-boot; `ubootconfig` uses the `rk3566.config` fragment |
+| LubanCat-0 | RK3566 | ⏳ Pending | Besides conf/u-boot, the SARADC board-ID mapping needs calibration on real hardware |
+
+"Supported" means an image was built *and* booted on that board — not merely
+"it compiles". Picking a `⏳ Pending` board in `tools/build-image.sh` is refused
+with a message listing what is missing.
+
+## Quick start
+
+```bash
+git clone git@github.com:raidenkl/lubancat-openeuler.git
+cd lubancat-openeuler
+
+# 1) Prepare the build environment (checks host, pulls image, creates container, fetches sources; idempotent)
+./scripts/init-env.sh
+
+# 2) Build (--dry-run -V prints the commands without running them)
+tools/build-image.sh --board lubancat-3 --desktop ukui -y
+
+# 3) Output lands in scripts/build/<date>/; flash the .img.xz with RKDevTool or upgrade_tool
+```
+
+To list boards: `tools/build-image.sh --list`.
+
+Build parameters: [docs/building.md](docs/building.md). Release process: [docs/release.md](docs/release.md).
+
+## Build environment
+
+### Host requirements
+
+| Item | Requirement | Notes |
+|---|---|---|
+| Architecture | **x86_64** | Target images are aarch64; the container runs arm64 code through qemu-user binfmt |
+| OS | Ubuntu 22.04 LTS (verified on 22.04.3) | Any distro providing equivalent docker and binfmt works |
+| CPU / RAM | ≥ 8 cores / ≥ 16 GiB (verified on 64 cores / 62 GiB) | Kernel and rootfs stages run inside the container; more cores help a lot |
+| Disk | **≥ 120 GiB free** | One full build uses 30–40 GiB under `scripts/build/` |
+| Network | Required for the first run | ~200 MB container image, 5–10 GiB of source repositories |
+| docker | 20.10+ (verified on 27.1.1); user in the `docker` group | rootfs/initrd/packaging stages all run in the container |
+| binfmt | `qemu-aarch64` registered | `ls /proc/sys/fs/binfmt_misc/qemu-aarch64` |
+
+The host does **not** need root to build: u-boot is compiled natively on the host
+(no mount, no chroot), and every stage that needs mount/chroot runs in the container.
+
+### One-shot setup
+
+```bash
+./scripts/init-env.sh                # host checks -> pull base image -> create container -> fetch sources
+./scripts/init-env.sh --check        # checks only, changes nothing (CI / troubleshooting)
+./scripts/init-env.sh --skip-fetch   # sources already present, just make sure the container is ready
+./scripts/init-env.sh --recreate     # repo moved? drop and recreate the container
+./scripts/init-env.sh --install-deps # install missing apt packages (calls sudo; explicit opt-in)
+./scripts/init-env.sh --fix-perms    # fix ownership when host-side u-boot build says "scripts/build is not writable"
+```
+
+By default the script **never calls sudo and never edits `/etc/docker/daemon.json`** —
+it reports what is missing and prints the command to fix it. `--check` performs no writes at all.
+
+<details>
+<summary><b>Manual steps (what the script does, click to expand)</b></summary>
+
+**1. Install host dependencies**
+
+```bash
+# Hard requirements: needed to fetch sources and verify checksums
+sudo apt-get install -y git curl coreutils tar gzip
+
+# Needed for the host-side u-boot build (build-image.sh defaults to --uboot-env host)
+sudo apt-get install -y python2 make gcc bc bison flex device-tree-compiler cpio
+```
+
+> `python2` is a hard requirement of Rockchip's `u-boot/make.sh` (it hardcodes
+> `PYTHON=python2`) and is not available in the openEuler 24.03 container, so it
+> belongs on the host. If you cannot install python2, use a prebuilt u-boot
+> (`build_uboot_from_src=0`) or `--uboot-env container` instead.
+
+**2. docker and aarch64 binfmt**
+
+```bash
+sudo usermod -aG docker "$USER"        # log in again afterwards
+sudo apt-get install -y qemu-user-static binfmt-support
+ls /proc/sys/fs/binfmt_misc/qemu-aarch64   # should say enabled
+```
+
+Without binfmt, even `uname` fails inside the container with `exec format error`.
+An alternative registration method:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install arm64
+```
+
+**3. Create the build container**
+
+```bash
+docker run -d --name oe-lubancat-build --platform linux/arm64 --privileged \
+  -v "$PWD:$PWD" -w "$PWD" \
+  openeuler/openeuler:24.03-lts-sp3 sleep infinity
+
+docker exec oe-lubancat-build uname -m     # expect aarch64
+```
+
+Two details:
+
+- **The repo is mounted at the same path inside the container** (`-v "$PWD:$PWD"`).
+  `tools/build-image.sh` looks up "where is this repo inside the container?" from
+  the container's mount table, so any clone location works. Only the legacy
+  workspace layout (parent directory mounted at `/work`, repo at
+  `/work/src/SBC-sig`) falls back to the old default.
+- The container is **long-lived** (`sleep infinity`), not `--rm`. A build runs in
+  stages — u-boot / kernel / boot / rootfs / image — and later stages reuse the
+  same container via `docker exec`.
+
+**4. Fetch sources**
+
+```bash
+./scripts/fetch-sources.sh            # fetch the 5 repos at the SHAs pinned in manifests/source-lock.yaml
+./scripts/fetch-sources.sh --check    # only verify that local SHAs match the lock file
+```
+
+The lock file pins commits for kernel `6.1.99`, u-boot `2017.09`, rkbin,
+openEuler SBC-sig and the upstream kernel, which makes builds reproducible.
+`src/` is not tracked by git (see `.gitignore`).
+
+</details>
+
+### Common failures
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `exec format error`, or `uname -m` fails in the container | Host has no binfmt registration | See step 2 above |
+| `permission denied ... Docker daemon` | User not in the `docker` group | `sudo usermod -aG docker $USER`, then log in again |
+| `docker pull` hangs | Slow direct access to Docker Hub | Configure a registry mirror, or `docker load` an offline image |
+| `scripts/build is not writable` (host-side u-boot) | Directory was written by root inside the container | `./scripts/init-env.sh --fix-perms` |
+| `No space left on device` near the end of a build | Not enough disk | Clean `scripts/build/` or move to a ≥120 GiB disk |
+| "leftover mounts under build/" | A previous build exited abnormally | `mount \| grep scripts/build`, then `umount` and `losetup -d` |
+
+## Repository layout
+
+```
+scripts/            upstream build scripts + this project's changes (build.sh / gen_rk_update.sh / mk_initrd.sh)
+scripts/init-env.sh build-environment setup (host checks / container / sources)
+scripts/bin/        tools, firmware, vendor binaries (libmali / npu / multimedia / u-boot)
+scripts/boards/     per-board configs (one .conf each, incl. POST_BOARD_OVERLAY) + matrix.tsv
+scripts/configs/    package lists, kernel defconfigs, boot.cmd, extlinux
+scripts/overlay/    rootfs overlay (board detection, audio/camera units, X11 config)
+tools/              entry points (build-image.sh builds an image; build-rpms.sh builds the rkaiq RPM)
+pkg/                RPM packaging sources (SPECS + SOURCES; currently camera-engine-rkaiq)
+manifests/          build provenance: source-lock, per-release summaries, checksums
+docs/               project documentation (kept apart from upstream documents/)
+build/              local helper scripts and on-board test programs (outputs not tracked)
+src/                upstream source repos (created by fetch-sources.sh, not tracked)
+```
+
+## Relationship to upstream
+
+- The first commit is **openEuler SBC-sig @521f1ae verbatim**, with none of this
+  project's changes, so `git diff` against it is noise-free.
+- Our changes start from the second commit and are recorded one by one in
+  [docs/upstream-sync.md](docs/upstream-sync.md).
+- We do **not** send PRs upstream; this is maintained as an independent downstream.
+
+## Known limitations
+
+- A single SD/eMMC card **cannot be shared across SoC families**: the loader and
+  dtb are bound to the SoC and only work within one family
+  (RK3588+RK3588S, RK3566+RK3568).
+- `parameter.txt` is generated by this project (boot partition = 256 MiB).
+  **Never mix it with a vendor `parameter` file when flashing.**
+- **The desktop renders with mesa/llvmpipe (software)**: X11 has no Mali
+  DRI2/GLX integration, which is expected. The GPU itself works (`Mali-G52` /
+  OpenGL ES 3.2, 1080p clear ≈680 fps) but must be used through the GBM platform,
+  e.g. `mali-env <program>`. Desktop-level GPU acceleration would need Wayland or
+  a Mali GLX provider for X — out of scope here.
+- Camera 3A (rkaiq) is baked into the image (`rkaiq_3A_server` + `/etc/iqfiles/`)
+  and `rkaiq_3A.service` is enabled by default. With no camera attached the
+  service exits and reaches `failed` after 5 restarts — that is expected.
+- Cameras are disabled by default: the `dtoverlay` lines in
+  `/boot/uEnv/uEnv.txt` are commented out and must be enabled by hand.
+- Verified on x86_64 hosts with docker only. Native aarch64 hosts should work in
+  principle but have not been tested.
+
+## License
+
+This project is licensed under MulanPSL-2.0 (see [LICENSE](LICENSE)).
+`scripts/`, `documents/` and other parts derived from openEuler SBC-sig @521f1ae
+are likewise MulanPSL-2.0; our modifications are recorded in [NOTICE](NOTICE) and
+in the git history. Bundled third-party binaries keep their original licenses —
+see [docs/third-party.md](docs/third-party.md).
