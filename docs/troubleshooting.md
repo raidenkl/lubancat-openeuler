@@ -238,7 +238,7 @@ grep -i swcursor /var/log/Xorg.0.log
 readlink /boot/rk-kernel.dtb      # 期望 dtb/rk3576-lubancat-3.dtb
 readlink /boot/uEnv/uEnv.txt      # 期望 uEnvLubanCat3.txt
 cat /etc/lubancat/board-name      # 期望 LubanCat-3
-ls -l /boot/.board_init           # 存在 = 已识别过，之后不再重试
+ls -l /boot/boot_init             # 存在 = 已识别过，之后不再重试
 ```
 
 ### 坑 1：IIO 设备名不是 `saradc`
@@ -256,17 +256,20 @@ ADC_RAW=$(cat /sys/bus/iio/devices/iio:device0/in_voltage2_raw)
 `scripts/overlay/common/usr/libexec/lubancat/board-init.sh` 已按厂商做法实现，
 不要改回按名字匹配。
 
-### 坑 2：`.board_init` 会把失败固化
+### 坑 2：`boot_init` 会把失败固化
 
-识别失败也会 `touch /boot/.board_init`，而 unit 的条件是
-`ConditionPathExists=!/boot/.board_init` → 之后每次启动都跳过，不再重试。
+识别失败也会 `touch /boot/boot_init`，而 unit 的条件是
+`ConditionPathExists=!/boot/boot_init` → 之后每次启动都跳过，不再重试。
 
 要重试：
 
 ```sh
-rm -f /boot/.board_init
+rm -f /boot/boot_init
 systemctl restart lubancat-board-init     # 会改软链并自动重启
 ```
+
+> 标记文件名与厂商 `boot_init.sh` 一致（早期镜像用的是 `/boot/.board_init`）。
+> 脚本启动时若发现老标记，会自动 `mv` 成新名字，所以刷过老镜像的板子不会被当成首启再重启一次。
 
 ### 坑 3：首启日志会被 reboot 清掉
 
@@ -601,3 +604,61 @@ systemd-analyze blame | head
 
 顺带：这条链还会让 `sshd-keygen@rsa.service` 失败（firstboot 里多余的 `ssh-keygen -A`
 与它并发写同一个密钥文件），已在 firstboot 里去掉，交给 `sshd-keygen@` 实例。
+
+## 构建"成功"但镜像里没有桌面（日志里有 `can not install ukui`）
+
+现象：`tools/build-image.sh --desktop ukui` 跑完、镜像也打出来了，但烧到板子上只有
+text console，没有 X/桌面。板子上查：
+
+```
+systemctl is-enabled lightdm     -> not-found      （unit 根本不存在）
+rpm -qa | grep -ci ukui          -> 0
+rpm -qa | wc -l                  -> 607            （ukui 镜像应该在 700+）
+```
+
+构建日志里有一行：
+
+```
+ERROR, can not install ukui.
+```
+
+两个独立问题叠在一起：
+
+1. **dnf 装不上**：openEuler `update` 仓库的 `repomd.xml` 与 metalink 登记的校验和
+   不一致（表现为 `Downloading successful, but checksum doesn't match` +
+   `Cannot download repomd.xml: All mirrors were tried`），而 dnf 会把"一个 repo 的
+   metadata 坏了"当成整条命令失败，于是 `install ukui` 整组没装上。
+2. **脚本不报错**：`INSTALL_PACKAGES()` 的循环里失败只 `LOG ERROR`，不退出，于是
+   残缺的 rootfs 继续被 initrd、boot.img、打包流程消费，产出一个"看起来成功"的镜像。
+
+修法（已落地）：
+
+- `dnf_chroot()` 包装所有 chroot dnf 调用，统一加
+  `--setopt='*.skip_if_unavailable=true'`：坏 repo 降级为跳过，不影响其它 repo；
+- 装包失败先自动用 `--refresh` 重拉一次仓库元数据再重试（`dnf_install_set()`），
+  仍失败才 `exit 1`（`build.sh` 是 `set -e`）—— 缺包就停，不产出假成功镜像。
+
+为什么需要那次 `--refresh`：同一个 `update` 仓库一天里给出过三种不同的错法，
+其中两种都只能靠"重拉元数据"自愈，而 dnf 在同一次处理里不会自己重试：
+
+| 现象 | 根因 |
+|---|---|
+| `Inconsistent server data, reported Content-Length: 1935657, metadata states 1935669` | 服务器上的 rpm 被重打包（短了 12 字节），repodata 没跟上 |
+| `Cannot download repomd.xml: All mirrors were tried`（校验和不符） | repomd.xml 与 metalink 登记不一致 |
+| `Curl error (28) 30s 超时` / `(92) HTTP/2 framing INTERNAL_ERROR` | 镜像抖动，dnf 自己的多镜像重试能兜住 |
+
+装包日志里出现 `install <包名> failed; retry once with --refresh` 就是这次兜底生效了。
+
+现状（2026-11-27）：`update` 仓库仍不一致，但已不影响构建 —— ukui 的 506 个包
+全部来自 OS / everything / EPOL，解析与安装都正常。
+
+自查方法：
+
+```bash
+# 构建机上，确认镜像里真的装了桌面
+M=/tmp/chk; mkdir -p $M
+mount -o loop,ro scripts/build/rkpack/Image/rootfs.img $M
+chroot $M rpm -qa | grep -c ukui          # 应为几十个，不是 0
+chroot $M rpm -q lightdm
+umount $M
+```

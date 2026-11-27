@@ -135,18 +135,54 @@ root_need() {
     fi
 }
 
+# 统一的 chroot dnf 包装。
+# --setopt='*.skip_if_unavailable=true'：把"某个上游 repo 的 metadata 坏了"降级成
+# 跳过该 repo，而不是让整条 dnf 命令失败。openEuler 的 update 仓库出现过
+# repomd.xml 校验和与 metalink 登记不符（持续复现），结果装 ukui 整组失败，
+# 而下面的循环只打 ERROR 就继续 —— 产出了没有桌面的"假成功"镜像。
+dnf_chroot() {
+    chroot ${rootfs_dir}/ dnf ${tmp_repo_info} --disablerepo="*" \
+        --setopt='*.skip_if_unavailable=true' "$@"
+}
+
+# 装一组包；失败时用 --refresh 重拉一次仓库元数据再试。
+#
+# 为什么需要：openEuler 的 update 仓库反复出现"元数据与本体不一致"，实测三类：
+#   1) NetworkManager-1.44.2-10：repodata 声明 1935669 字节，服务器实际给 1935657
+#      → dnf 报 "Inconsistent server data ... repository metadata states file length"
+#   2) repomd.xml 校验和与 metalink 登记不符 → 整个 repo 的 metadata 都下不来
+#   3) 镜像偶发 Curl 28（30s 连接超时）/ 92（HTTP2 stream INTERNAL_ERROR）
+# 这三类里 (1)(2) 只要重拉一次 metadata 就能自愈（上游修复后 repodata 会更新），
+# 但同一次 dnf 处理里 dnf 会一直用那份坏缓存，不会自己重试——所以由这里补一次。
+# (3) 由 dnf 自身的多镜像重试兜住，这里只是顺手再给一次机会。
+dnf_install_set() {
+    local desc=$1
+    shift
+    if dnf_chroot install -y "$@" --nogpgcheck; then
+        LOG "$desc installed."
+        return 0
+    fi
+    LOG "install $desc failed; retry once with --refresh (重新拉取仓库元数据)"
+    if dnf_chroot --refresh --setopt=retries=10 --setopt=timeout=120 \
+            install -y "$@" --nogpgcheck; then
+        LOG "$desc installed (after --refresh)."
+        return 0
+    fi
+    return 1
+}
+
 INSTALL_PACKAGES(){
     tmp_repo_info=$2
-    chroot ${rootfs_dir}/ dnf ${tmp_repo_info} --disablerepo="*" makecache --nogpgcheck
+    dnf_chroot makecache --nogpgcheck || LOG "makecache: 有仓库不可用，已跳过（继续装包）"
     if [ "x${board}" == "xraspberrypi" ] && [ -z "${kernel_url}"  ]; then
-        chroot ${rootfs_dir}/ dnf ${tmp_repo_info} --disablerepo="*" install -y raspberrypi-kernel --nogpgcheck
+        dnf_chroot install -y raspberrypi-kernel --nogpgcheck
         if [ $? == 0 ]; then
             LOG raspberrypi-kernel installed.
         else
             ERROR can not install raspberrypi-kernel.
         fi
         if [ "x$spec_param" == "xgnome" ] || [ "x$spec_param" == "xdevstation" ]; then
-            chroot ${rootfs_dir}/ dnf ${tmp_repo_info} --disablerepo="*" install -y raspberrypi-kernel-tools --nogpgcheck
+            dnf_chroot install -y raspberrypi-kernel-tools --nogpgcheck
             if [ $? == 0 ]; then
                 LOG raspberrypi-kernel-tools installed.
             else
@@ -156,15 +192,16 @@ INSTALL_PACKAGES(){
     fi
     for item in $(cat $1)
     do
-        chroot ${rootfs_dir}/ dnf ${tmp_repo_info} --disablerepo="*" install -y $item --nogpgcheck
-        if [ $? == 0 ]; then
-            LOG $item installed.
-        else
+        # 失败先自动 --refresh 重试一次（见 dnf_install_set 的注释）；
+        # 仍失败就停：宁可构建失败，也不要产出"看起来成功、实际缺整组包"的镜像
+        # （曾因 update 仓库 metadata 校验失败，ukui 整组没装上，镜像照常打包）
+        dnf_install_set "$item" "$item" || {
             ERROR can not install $item.
-        fi
+            exit 1
+        }
     done
     if [ "x${bootmode}" == "xgrub" ]; then
-        chroot ${rootfs_dir}/ dnf ${tmp_repo_info} --disablerepo="*" install -y grub2-efi-aa64 grub2-efi-aa64-modules efibootmgr --nogpgcheck
+        dnf_chroot install -y grub2-efi-aa64 grub2-efi-aa64-modules efibootmgr --nogpgcheck
     fi
 }
 
