@@ -684,6 +684,21 @@ reexec_in_container() {
         esac
         args+=("$a")
     done
+
+    # 交互模式下 ORIG_ARGS 是空的（用户只敲了 build-image.sh），板卡/桌面只存在于
+    # 本进程的变量里。不补上去，容器里的新实例就没有 --board —— 而 docker exec 不带
+    # TTY，第二个实例无法再弹菜单，只能 die "未指定 --board"。
+    # 只补关键字（跨宿主/容器都成立）：SPEC/KERNEL_URL 是宿主绝对路径，容器里不存在，
+    # 由容器自己按 --desktop 重算；-n 补上是为了让容器内镜像名与确认框显示的一致
+    # （否则容器会按自己的时间戳重新生成）。重复传无妨，后面的赋值覆盖前面的。
+    args+=(--board "$BOARD" --desktop "$DESKTOP" --layout "$LAYOUT")
+    [ -n "$NAME" ] && args+=(-n "$NAME")
+
+    # 宿主这次已经确认过了（reexec 只会在确认块之后被调用），容器里不能再问一遍：
+    # docker exec 没有 TTY，ask 会立刻 EOF/超时（"输入超时或 EOF"）。
+    # -y 只影响确认块（ASSUME_YES 全局唯一用处），不会吞掉别的东西。
+    args+=(-y)
+
     info "→ 其余阶段转入容器执行: $CONTAINER:$CTR_WORKDIR"
     exec docker exec -w "$CTR_WORKDIR" "$CONTAINER" tools/build-image.sh "${args[@]}" --uboot-env container
 }
@@ -714,7 +729,11 @@ if [ "$IN_CONTAINER" = 0 ]; then
             if [ "$UBOOT_ENV" = host ]; then
                 if [ "$DRY_RUN" = 1 ]; then
                     info "[dry-run] 宿主: bash scripts/build_u-boot.sh --board $BOARD（源码编）"
-                    info "[dry-run] 容器: tools/build-image.sh <其余阶段> --uboot-env container"
+                    # 显式列出实际会转发给容器的参数：交互模式下 ORIG_ARGS 为空时，
+                    # 全靠这里补的 --board/--desktop/--layout/-n，写出来才看得出透传有没有丢
+                    dr_args="--board $BOARD --desktop $DESKTOP --layout $LAYOUT"
+                    [ -n "$NAME" ] && dr_args="$dr_args -n $NAME"
+                    info "[dry-run] 容器: tools/build-image.sh $dr_args -y --uboot-env container"
                     exit 0
                 fi
                 stage_uboot_host
