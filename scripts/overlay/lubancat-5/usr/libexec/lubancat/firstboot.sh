@@ -28,8 +28,10 @@ fi
 BOARD=$(cat /etc/lubancat/board-name 2>/dev/null | tr " " "-" | tr -d "\n")
 [ -n "$BOARD" ] || BOARD=LubanCat
 HN="${BOARD}-$(printf "%s" "$MID" | cut -c1-6)"
+# hostnamectl 走 D-Bus；若 D-Bus/polkit 还没就绪会一直阻塞（曾因 udev-settle 卡住
+# sysinit.target 而等了 92s）。加超时兜底，超时就退回直接写 /etc/hostname。
 if command -v hostnamectl >/dev/null 2>&1; then
-    hostnamectl set-hostname "$HN" 2>/dev/null || {
+    timeout 10 hostnamectl set-hostname "$HN" 2>/dev/null || {
         echo "$HN" > /etc/hostname
         hostname "$HN" 2>/dev/null || true
     }
@@ -41,8 +43,9 @@ fi
 sed -i "/127\.0\.1\.1/d" /etc/hosts 2>/dev/null || true
 printf "127.0.1.1\t%s\n" "$HN" >> /etc/hosts
 
-# 4) SSH 主机密钥兜底（sshd-keygen@ 实例已在 Wants 链上，此处保险）
-ssh-keygen -A >/dev/null 2>&1 || true
+# 4) SSH 主机密钥：交给 sshd-keygen@ 实例（sshd.service 会 Wants=sshd-keygen.target）。
+# 这里不要再跑 ssh-keygen -A —— 与 sshd-keygen@rsa 并发写同一个密钥文件，
+# 实测会让 sshd-keygen@rsa.service 失败（Failed to start OpenSSH rsa Server Key Generation）。
 
 echo "$HN" > "$MARK"
 echo "firstboot: hostname=$HN machine-id=${MID:0:12}..."

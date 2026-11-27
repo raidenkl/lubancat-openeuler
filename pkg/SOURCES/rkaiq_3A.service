@@ -1,7 +1,11 @@
 [Unit]
 Description=RKAIQ 3A Server (Rockchip ISP tuning daemon)
-After=systemd-udev-settle.service
-Wants=systemd-udev-settle.service
+# 不要 Wants=systemd-udev-settle.service / After=systemd-udev-settle.service：
+# 该 unit 自带 Before=sysinit.target，等于把「等 udev 队列清空」变成整机启动的同步点。
+# 实测（Cat-4IO，M.2 槽空着）：pcie2x1l2 链路协商不上，udev 队列 ~90s 才清空，
+# 于是 sysinit.target 迟迟不到 —— 连 D-Bus socket 都没起来，firstboot 的 hostnamectl
+# 跟着阻塞，整机多等 92s。rkaiq 只需要 media 节点，按设备单元排序即可（设备不存在时不阻塞）。
+After=dev-media0.device systemd-udev-trigger.service
 # systemd 235+ 把启动限速参数放在 [Unit]；放在 [Service] 会被忽略
 StartLimitIntervalSec=60
 StartLimitBurst=5
