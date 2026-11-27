@@ -27,7 +27,8 @@ git diff --stat upstream/master -- scripts documents
 | 路径 | 偏离 | 引入 commit | 原因 |
 |---|---|---|---|
 | `scripts/build.sh` | 修改 | C2 | 增加 `--layout gpt\|vendor`，默认 vendor；本次：阶段顺序改为 内核 → rootfs → boot.img（initrd 要 chroot 进 rootfs），vendor 布局补写 image 标记 |
-| `scripts/build_boot.sh` | 修改 | C2/C11 | 新增 `mk_extboot()`；C11 起才真正从重编判据去掉 `dtb_name`（此前换板仍会全量重编）；本次：新增 --stage kernel|bootimg，供 build.sh 分两次调用；本次：mk_extboot 支持 extboot_generic_first，初始 rk-kernel.dtb/uEnv 用家族 generic |
+| `scripts/build_boot.sh` | 修改 | C2/C11 | 新增 `mk_extboot()`；C11 起才真正从重编判据去掉 `dtb_name`（此前换板仍会全量重编）；本次：新增 --stage kernel|bootimg，供 build.sh 分两次调用；本次：mk_extboot 支持 extboot_generic_first，初始 rk-kernel.dtb/uEnv 用家族 generic；本次：只产 Image-<ver>（不复制 /Image）、extlinux 兜底改版本化内核名 + generic dtb、uEnv 的 size 改 0x8000、rockchip_bootargs 改 ttyFIQ0 |
+| `scripts/configs/common/boot.cmd` | 修改 | 本次 | 内核改为优先 `/Image-<uname_r>`；移植厂商 gsdt 通用屏自动识别（默认关闭）；`dev_bootpart` 提到 overlay 段之前 |
 | `scripts/build_rootfs.sh` | 修改 | C2 | 调用 `POST_BOARD_OVERLAY` 钩子 |
 | `scripts/build_u-boot.sh` | 修改 | 本次 | 复制厂商 u-boot 产物改 `cp -a`：裸 `cp *` 遇到子目录返回非 0，脚本是 `set -e`，会直接中断构建（实测被 `bin/u-boot/lubancat-5/pcie-named/` 触发） |
 | `scripts/gen_image.sh` | 修改 | C2 | extboot 布局下替换占位 root UUID |

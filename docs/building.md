@@ -80,6 +80,40 @@ boot 分区里放的是**整个 SoC 家族**的 dtb 与 uEnv（`build_boot.sh` �
 代价：每块板**首启多一次重启**（串口能看到 `board-init: name=... dtb=... uenv=...` 后再重启）。
 收益：rk3588 家族（Cat-5 / 4 / 4IO 及各 IO 变体）只需维护一份镜像。
 
+**boot 分区里放什么**（extboot 布局，与厂商一致）：
+
+```
+/boot/Image-<kernelrelease>     内核（版本化，boot.cmd 用 uEnv 的 uname_r 拼出来）
+/boot/System.map-<ver>          调试符号
+/boot/config-<ver>              内核配置
+/boot/initrd.img                initramfs
+/boot/boot.cmd  /boot/boot.scr  U-Boot 启动脚本
+/boot/rk-kernel.dtb             当前板卡 dtb（首启后是软链 dtb/<板>.dtb；构建期是普通文件=generic）
+/boot/dtb/*.dtb                 全系板卡 dtb
+/boot/dtb/overlay/*.dtbo        设备树插件
+/boot/uEnv/*.txt                各板卡变量文件（uEnv.txt 首启后软链到实板那份）
+/boot/extlinux/extlinux.conf    boot.scr 失效时的兜底配置
+```
+
+**换内核**：只放 `Image-<版本>` 一份，`boot.cmd` 按 `uEnv/<板>.txt` 里的 `uname_r`
+去加载对应文件。所以
+
+- 想换内核版本：把新 Image 拷成 `/boot/Image-<新版本>`，改 `uname_r`，重启；
+- 想回滚：把 `uname_r` 改回旧版本号（旧 Image 没删就能直接回）；
+- **不要再往 `/boot/Image` 拷**：那是旧布局的兜底名，只在 `uname_r` 缺失/文件不存在时才会用到。
+
+**通用屏自动识别**（`enable_gsdt_auto_load`）：`boot.cmd` 已移植厂商那套
+「读背板 EEPROM → 叠 `gsdt_plugin0/1`」的逻辑，但构建期默认写 `0`。
+要启用就在板子上改 `/boot/uEnv/<板>.txt`：
+
+```sh
+sed -i 's/^enable_gsdt_auto_load=.*/enable_gsdt_auto_load=1/' /boot/uEnv/uEnvLubanCat4IO.txt
+sync; reboot
+```
+
+> 默认关的原因：无屏板子上会多一轮 i2c 扫描噪声，而且"插上就亮"这条路径
+> 还没有实机验证过亮屏效果。改回 0 就恢复原行为。
+
 **宿主 / 容器分工**（v0.7 起）：
 
 | 阶段 | 在哪跑 | 原因 |
