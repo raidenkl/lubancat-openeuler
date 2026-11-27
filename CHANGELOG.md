@@ -5,6 +5,40 @@
 
 镜像命名与 tag 逐字符对应：`<board>_openEuler-24.03-LTS_aarch64_<tag>.img.xz`。
 
+## [Unreleased]（一份镜像通吃同族 + 构建链修复 + 开机 92 秒）
+
+### Added
+- **一份镜像通 SoC 家族**（`extboot_generic_first=1`，rk3588 与 rk3576 均开）：
+  `mk_extboot` 以 `extboot_generic_dtb` / `extboot_generic_uenv` 作为初始
+  `rk-kernel.dtb` 与 `uEnv.txt`，首启由 board-init 读 SARADC 判定实板、`ln -sf` 覆盖后
+  重启一次。解决"换板就卡在内核早期、而 board-init 是用户态服务永远跑不到"的死锁。
+  覆盖范围：rk3588（Cat-5 / 4 / 4IO 及各 IO 变体）、rk3576（Cat-3 / 3-V2 / 3IO）。
+- 板卡：`scripts/boards/lubancat-4.conf`、`lubancat-4io.conf`（u-boot/defconfig 复用
+  lubancat-5，同族），matrix 由 `blocked` 改为 `buildable`。
+- `tools/build-image.sh --purge` / `--purge-all`：清编译产物（含**容器命名空间**里的
+  残留挂载与 loop 设备，宿主看不到这些），换 SoC/换板前用；`--clean all` 复用同一逻辑。
+
+### Changed
+- `lubancat-5.conf` 的 board-init 统一到 `overlay/common`（原来用 `overlay/lubancat-5`
+  那份 104 行旧脚本，会让"同一份镜像"的内容随构建时选的板而变）。旧的两份已无引用，删除。
+- `build-image.sh` 预检按 conf 的 `local_uboot_dir` 找 u-boot（原来按板名硬拼
+  `bin/u-boot/<board>/`，同族复用一律误报"缺预编译 u-boot"）；`-V` 增加"初始启动 dtb"一行。
+
+### Fixed
+- **从零构建必失败**：阶段顺序是 `u-boot → 编内核+打boot.img → rootfs`，而 initrd 必须
+  chroot 进 aarch64 rootfs 生成，干净树上必然报 `initrd.img missing and rootfs.img absent`。
+  改为 内核 → rootfs → boot.img（`build_boot.sh` 新增 `--stage kernel|bootimg`），
+  并补 vendor 布局的 `image` 标记（原来只有 gen_image.sh 的 gpt 路径写，`.done` 永不重置）。
+- **宿主 u-boot 阶段被打断**：`build_u-boot.sh` 用裸 `cp *` 复制厂商产物，遇到子目录
+  返回非 0 而脚本是 `set -e`。改 `cp -a`，并删掉触发它的无引用目录
+  `bin/u-boot/lubancat-5/pcie-named/`。
+- **开机多等 ~92 秒**：`rkaiq_3A.service` 带 `Wants=systemd-udev-settle.service`，而该 unit
+  是 `Before=sysinit.target`。空着的 M.2 槽（pcie2x1l2）链路协商不上时 udev 队列 ~90s
+  才清空，整机被卡在 sysinit.target（连 D-Bus 都没起来，firstboot 的 hostnamectl 跟着阻塞）。
+  去掉该依赖，改 `After=dev-media0.device systemd-udev-trigger.service`。
+- `firstboot.sh`：`hostnamectl` 加 `timeout 10` 兜底；去掉与 `sshd-keygen@rsa` 并发写
+  同一密钥文件的 `ssh-keygen -A`（它导致 `sshd-keygen@rsa.service` FAILED）。
+
 ## [Unreleased]（rkaiq 装进镜像并默认自启 + 音频修复适用范围 + 仓库清理）
 
 ### Changed

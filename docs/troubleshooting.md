@@ -460,3 +460,144 @@ dnf install -y --nogpgcheck /opt/rpms/camera-engine-rkaiq-*.rpm
 `rkaiq_3A.service` 默认启用。没接摄像头时它会因 media 拓扑缺失退出，5 次后进 failed ——
 `systemctl --failed` 里看到它是预期噪音；接上摄像头（并打开 uEnv 的 dtoverlay）后自动恢复正常。
 确实不用 3A 时：`systemctl disable --now rkaiq_3A.service`。
+
+## 宿主 u-boot 阶段失败：`cp: -r not specified; omitting directory`
+
+现象（`tools/build-image.sh` 走到 u-boot 阶段就退出）：
+
+```
+cp .../scripts/bin/u-boot/lubancat-5/MiniLoaderAll.bin .../u-boot.itb .../scripts/build/u-boot
+cp: -r not specified; omitting directory '.../scripts/bin/u-boot/lubancat-5/pcie-named'
+build-image.sh: 宿主 u-boot 构建失败
+```
+
+原因：`scripts/bin/u-boot/<board>/` 下放了**子目录**（历史遗留的变体备份，如 `pcie-named/`），
+而 `scripts/build_u-boot.sh` 的预编译分支是 `cp ${local_uboot_dir}/* ...`，裸 `cp` 遇到目录返回非 0，
+脚本又是 `set -e`，于是一个无关目录就能把整个构建打断。
+
+修复（两层，都已落地）：
+
+```bash
+# 1) 脚本改成 cp -a（对子目录/附加文件免疫）
+grep -n "cp -a \${local_uboot_dir}" scripts/build_u-boot.sh
+
+# 2) 清掉多余目录（子目录通常是 root 建的，要用容器删）
+ls scripts/bin/u-boot/*/ | grep -v '://' | head
+docker exec oe-lubancat-build rm -rf /work/src/SBC-sig/scripts/bin/u-boot/lubancat-5/pcie-named
+```
+
+自查：`find scripts/bin/u-boot -mindepth 2 -type d` 应该没有任何输出。
+
+## boot 阶段报 `initrd.img missing and rootfs.img absent`
+
+现象（从零构建时必现，尤其是刚跑过 `--purge` 之后）：
+
+```
+INFO, start make bootimg...
+ERROR initrd.img missing and rootfs.img absent; run build_rootfs.sh first
+      (host dracut would build an unusable x86 initramfs)
+```
+
+两层原因：
+
+1. initrd 必须 chroot 进 **aarch64 rootfs** 生成——构建容器是 x86_64，宿主 dracut 会
+   打出 x86 的 initramfs，板子上 `/init` 直接 `ENOEXEC(-8)`；
+2. 而 `build.sh` 原来的阶段顺序是 `u-boot → build_boot.sh(编内核+打 boot.img) → build_rootfs.sh`，
+   **boot 阶段永远跑在 rootfs 之前**，于是在干净树上必然命中这个保护。
+
+之前没暴露，是因为 `.done` 里留着 `bootimg` 标记把整步跳过了；`--purge` 清掉断点后就现形。
+
+修复（已落地）：把 boot 阶段拆成两段，中间插 rootfs：
+
+```
+--stage kernel（编内核，产出 boot_dir + kernel-modules）
+→ rootfs.img（装模块）
+→ --stage bootimg（chroot 生成 initrd + 打 boot.img）
+```
+
+自查：
+
+```sh
+cat scripts/build/.done            # 期望依次看到 kernel / rootfs / bootimg / image
+ls -l scripts/build/rootfs.img scripts/build/boot.img
+```
+
+## 换一块同族板卡后，串口卡在内核早期（CPU/外设初始化）
+
+典型现象：U-Boot 能跑完并加载内核，但内核只到 `smp: Bringing up secondary CPUs` 前后就停，
+串口里能看到**板名却是另一块板**：
+
+```
+Model: Embedfire LubanCat-5          <- U-Boot 载入 rk-kernel.dtb 之后
+Machine model: Embedfire LubanCat-5  <- 内核
+```
+
+原因：镜像里的 `rk-kernel.dtb` 是**构建时那块板**的 dtb。换板后设备树描述的是别的硬件，
+内核早期就挂；而 `board-init`（负责按 SARADC 换 dtb）是 systemd 用户态服务，起不来就跑不到。
+
+修复：把 conf 里的 `extboot_generic_first` 置 1（`extboot_generic_dtb` / `extboot_generic_uenv`
+也要有），让镜像先用家族 generic dtb 启动，首启由 board-init 判定实板后覆盖并重启一次。
+rk3588 家族（lubancat-5 / 4 / 4io）已经默认打开。
+
+自查镜像里初始用的是哪个 dtb：
+
+```bash
+# 构建机上
+ls -l scripts/build/extboot/rk-kernel.dtb
+cmp -s scripts/build/extboot/rk-kernel.dtb \
+       scripts/build/extboot/dtb/rk3588-lubancat-generic.dtb && echo "generic ✓" || echo "不是 generic"
+grep -c "dtoverlay=" scripts/build/extboot/uEnv/uEnv.txt   # generic uEnv 里应全是注释
+```
+
+## 预检报「缺预编译 u-boot」但其实同族有
+
+```
+build-image.sh: WARN: 缺预编译 u-boot: bin/u-boot/lubancat-4/u-boot.itb
+```
+
+同 SoC 家族的板卡共用一份 u-boot（Cat-4/4IO 复用 `bin/u-boot/lubancat-5/`），
+conf 里用 `local_uboot_dir` 指定。预检现在按 `local_uboot_dir` 找，不再按板名硬拼目录
+（早期版本会误报）。
+
+## 开机卡在 `A start job is running for Wait for udev Device Initialization`（约 90 秒）
+
+现象：系统能起来，但每次开机都要等 ~90 秒才继续；期间串口只有
+
+```
+rk-pcie fe190000.pcie: PCIe Linking... LTSSM is 0x3        (刷屏，171 次被抑制)
+rk-pcie fe190000.pcie: PCIe Link Fail, LTSSM is 0x3
+[*     ] A start job is running for Wait for udev Device Initialization (10s / 3min)
+```
+
+根因链（实测 Cat-4IO，M.2 槽空着）：
+
+1. `rkaiq_3A.service` 的 unit 里有 `Wants=systemd-udev-settle.service`；
+2. `systemd-udev-settle.service` 自带 **`Before=sysinit.target`** —— 它一跑就变成
+   「整机启动的同步点」；
+3. 4-IO 的 `&pcie2x1l2`（M.2 槽）启用了但槽位空着，链路协商不上，udev 事件队列
+   ~90 秒才清空 → settle 一直不返回；
+4. `sysinit.target` 等 settle，于是 **D-Bus socket 也没起来**；`lubancat-firstboot`
+   里的 `hostnamectl set-hostname`（走 D-Bus）跟着阻塞，所以 firstboot、polkit、
+   D-Bus 全在同一时刻（~102s）才完成 —— 看起来像"某个服务起不来"，其实是同一棵树。
+
+修复：
+
+- `pkg/SOURCES/rkaiq_3A.service` 去掉 `Wants/After=systemd-udev-settle.service`，
+  改成 `After=dev-media0.device systemd-udev-trigger.service`（rkaiq 只等 media 节点）；
+- `firstboot.sh` 的 `hostnamectl` 加 `timeout 10` 兜底（D-Bus 不就绪时退回写
+  `/etc/hostname`，不再无限阻塞）。
+
+现场快速验证（不用重编镜像，1 分钟）：
+
+```sh
+sudo ln -sf /dev/null /etc/systemd/system/systemd-udev-settle.service   # mask
+sudo reboot
+systemd-analyze            # 看 total 是否从 ~110s 掉到 ~10s
+systemd-analyze blame | head
+```
+
+> `systemd-udev-settle` 本身已被 systemd 标记为「不应使用」：任何服务都不该等它。
+> 需要等某个设备就用 `After=<dev-xxx.device>` 精确排序。
+
+顺带：这条链还会让 `sshd-keygen@rsa.service` 失败（firstboot 里多余的 `ssh-keygen -A`
+与它并发写同一个密钥文件），已在 firstboot 里去掉，交给 `sshd-keygen@` 实例。

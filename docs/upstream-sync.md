@@ -26,9 +26,10 @@ git diff --stat upstream/master -- scripts documents
 
 | 路径 | 偏离 | 引入 commit | 原因 |
 |---|---|---|---|
-| `scripts/build.sh` | 修改 | C2 | 增加 `--layout gpt\|vendor`，默认 vendor |
-| `scripts/build_boot.sh` | 修改 | C2/C11 | 新增 `mk_extboot()`；C11 起才真正从重编判据去掉 `dtb_name`（此前换板仍会全量重编） |
+| `scripts/build.sh` | 修改 | C2 | 增加 `--layout gpt\|vendor`，默认 vendor；本次：阶段顺序改为 内核 → rootfs → boot.img（initrd 要 chroot 进 rootfs），vendor 布局补写 image 标记 |
+| `scripts/build_boot.sh` | 修改 | C2/C11 | 新增 `mk_extboot()`；C11 起才真正从重编判据去掉 `dtb_name`（此前换板仍会全量重编）；本次：新增 --stage kernel|bootimg，供 build.sh 分两次调用；本次：mk_extboot 支持 extboot_generic_first，初始 rk-kernel.dtb/uEnv 用家族 generic |
 | `scripts/build_rootfs.sh` | 修改 | C2 | 调用 `POST_BOARD_OVERLAY` 钩子 |
+| `scripts/build_u-boot.sh` | 修改 | 本次 | 复制厂商 u-boot 产物改 `cp -a`：裸 `cp *` 遇到子目录返回非 0，脚本是 `set -e`，会直接中断构建（实测被 `bin/u-boot/lubancat-5/pcie-named/` 触发） |
 | `scripts/gen_image.sh` | 修改 | C2 | extboot 布局下替换占位 root UUID |
 | `scripts/configs/common/rpmlist` | 修改 | C2 | 补 iw / wireless-regdb / NetworkManager-wifi |
 | `scripts/configs/common/extlinux.conf` | 修改 | C2 | 调整启动参数 |
@@ -41,7 +42,7 @@ git diff --stat upstream/master -- scripts documents
 | `scripts/configs/common/{boot.cmd,lubancat_linux_rk3588_defconfig,rpmlist-lubancat-desktop}` | 新增 | C3 | 板卡启动脚本 / 内核配置 / 包清单 |
 | `scripts/bin/{libmali,multimedia,npu,u-boot/lubancat-5}` | 新增 | C4 | 厂商二进制 |
 | `pkg/`、`manifests/`、`docs/`、`build/*.sh` | 新增 | C5/C6 | 打包源、构建溯源与工程文档 |
-| `tools/build-image.sh` | 新增 | C11 | 统一构建入口：选 SoC → 选板卡 → 选桌面(ukui/none)，包装 `scripts/build.sh` |
+| `tools/build-image.sh` | 新增 | C11 | 统一构建入口：选 SoC → 选板卡 → 选桌面(ukui/none)，包装 `scripts/build.sh`；本次：预检按 conf 的 local_uboot_dir 找 u-boot（原来按板名硬拼，同族复用会误报） |
 | `scripts/boards/matrix.tsv` | 新增 | C11 | 板卡矩阵，新增板卡只改这里一行 |
 | `scripts/configs/common/rpmlist-headless` | 新增 | C11 | 无桌面包清单（`rpmlist` 去掉 4 行桌面项） |
 | `tests/test-build-image.sh` | 新增 | C11 | 矩阵与入口脚本的静态校验（CI 可跑） |

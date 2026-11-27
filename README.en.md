@@ -163,6 +163,7 @@ openEuler SBC-sig and the upstream kernel, which makes builds reproducible.
 | `scripts/build is not writable` (host-side u-boot) | Directory was written by root inside the container | `./scripts/init-env.sh --fix-perms` |
 | `No space left on device` near the end of a build | Not enough disk | Clean `scripts/build/` or move to a ≥120 GiB disk |
 | "leftover mounts under build/" | A previous build exited abnormally | `mount \| grep scripts/build`, then `umount` and `losetup -d` |
+| `afptool`/`parameter` errors after switching SoC or board, or a wrong dtb in boot.img | Kernel and packaging intermediates from the previous SoC were reused | `tools/build-image.sh --purge`, then rebuild |
 
 ## Repository layout
 

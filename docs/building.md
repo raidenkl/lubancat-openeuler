@@ -43,10 +43,42 @@ tools/build-image.sh --board lubancat-5 --dry-run -V           # 只打印将执
 
 # 分步
 tools/build-image.sh --board lubancat-3 --stage uboot -y       # 只编 u-boot（宿主编）
-tools/build-image.sh --board lubancat-3 --stage kernel -y      # 只编内核 + boot.img
-tools/build-image.sh --board lubancat-5 --stage boot -y
+tools/build-image.sh --board lubancat-3 --stage kernel -y      # 只编内核（rootfs 要装它的模块）
+tools/build-image.sh --board lubancat-3 --stage rootfs -y      # 只做 rootfs.img
+tools/build-image.sh --board lubancat-3 --stage boot -y        # 只打 boot.img（需 kernel+rootfs 就绪）
 tools/build-image.sh --board lubancat-5 --stage image -y       # 改 overlay 后只重打包
+
+# 换 SoC / 换板卡之前先清中间产物（否则会复用上一个 SoC 的内核与打包中间件）
+tools/build-image.sh --purge         # 清内核/rkpack/rootfs/中间镜像/断点/日志，保留工具链与历史输出
+tools/build-image.sh --purge-all     # 同上，并删掉 scripts/build/<日期>/ 的历史输出（不可恢复）
 ```
+
+**阶段顺序**（`--stage all` 时自动按此排列）：
+
+```
+u-boot → 编内核 → rootfs.img → boot.img → 打包镜像
+```
+
+不是"编内核就直接打 boot.img"，因为 initrd 必须 chroot 进 **aarch64 rootfs** 生成
+（构建容器是 x86_64，宿主 dracut 会打出 x86 的 initramfs，板子上 `/init` 报 ENOEXEC），
+而 rootfs 又要装内核模块。`.done` 里对应 `kernel` / `rootfs` / `bootimg` 三个标记。
+
+**一份镜像通 SoC 家族**（`extboot_generic_first=1`，rk3588 家族已开）：
+
+boot 分区里放的是**整个 SoC 家族**的 dtb 与 uEnv（`build_boot.sh` 里 `cp dts/rockchip/*.dtb`），
+但上电时只能有一个 `rk-kernel.dtb`。两种选法：
+
+| | 初始 `rk-kernel.dtb` | 换板后果 |
+|---|---|---|
+| `extboot_generic_first=0`（默认老行为） | 本板 dtb | 换到别的板会拿错设备树，卡在 CPU/外设初始化 |
+| `extboot_generic_first=1`（rk3588 家族已开） | `extboot_generic_dtb`（`*-generic.dtb`） | generic 先起来 → board-init 读 SARADC 判定实板 → `ln -sf` 覆盖 `rk-kernel.dtb` 与 `uEnv.txt` → **重启一次** → 进正常系统 |
+
+为什么必须 generic-first：`board-init` 是 **systemd 用户态服务**。初始 dtb 若描述的是另一块板，
+内核早期就卡住，用户态永远起不来，也就永远轮不到它去换 dtb —— 死锁。
+`extboot_generic_dtb` / `extboot_generic_uenv` 是在 `boards/<board>.conf` 里声明的家族兜底。
+
+代价：每块板**首启多一次重启**（串口能看到 `board-init: name=... dtb=... uenv=...` 后再重启）。
+收益：rk3588 家族（Cat-5 / 4 / 4IO 及各 IO 变体）只需维护一份镜像。
 
 **宿主 / 容器分工**（v0.7 起）：
 

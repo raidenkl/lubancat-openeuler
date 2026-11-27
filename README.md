@@ -24,7 +24,8 @@ openEuler 24.03 LTS SP3 镜像的构建工程。基于 openEuler SBC-sig 的构�
 |---|---|---|---|
 | LubanCat-5 | RK3588 | ✅ 已支持 | alpha10：ukui 桌面可进；headless 未单独验证 |
 | LubanCat-3 | RK3576 | ✅ 已支持 | alpha6（Cat-3 V2）：板型自动识别、千兆网口、主机名、X 桌面、GPU `Mali-G52`（1080p 清屏 ≈1.5 ms/帧、≈680 fps）、3.5mm 耳机有声、NPU 3.3 ms/次、VPU 1080p 编 109 fps / 解 567 fps、摄像头 `imx415` 取帧、rkaiq 3A 已装并自启 |
-| LubanCat-4 | RK3588S | ⏳ 待补齐 | 缺 `boards/lubancat-4.conf` 与 u-boot 产物（`soc_name` 要写 `rk3588`） |
+| LubanCat-4 | RK3588S | 🔧 可构建，待实机验证 | conf 已补；u-boot/defconfig 与 Cat-5 共用（同族），差异只在 dtb |
+| LubanCat-4IO | RK3588S | 🔧 可构建，待实机验证 | 同 Cat-4，dtb 用 `rk3588s-lubancat-4io` |
 | LubanCat-2 | RK3568 | ⏳ 待补齐 | 缺 conf 与 u-boot；`soc_name` 要写 `rk356x` |
 | LubanCat-1 | RK3566 | ⏳ 待补齐 | 缺 conf 与 u-boot；`ubootconfig` 用 `rk3566.config` fragment |
 | LubanCat-0 | RK3566 | ⏳ 待补齐 | 除 conf/u-boot 外，还需实机标定 SARADC 板型映射 |
@@ -154,6 +155,7 @@ docker exec oe-lubancat-build uname -m     # 期望 aarch64
 | `scripts/build 不可写`（宿主编 u-boot） | 目录被容器内 root 写过 | `./scripts/init-env.sh --fix-perms` |
 | 构建末尾 `No space left on device` | 磁盘不足 | 清 `scripts/build/` 或换 ≥120 GiB 的盘 |
 | 「检测到 build/ 下有残留挂载」 | 上次构建异常退出 | `mount \| grep scripts/build` 后 `umount`，再 `losetup -d` |
+| 换 SoC/板卡后报 `afptool`/`parameter` 错、或 boot.img 里 dtb 不对 | 复用了上一个 SoC 的内核与打包中间件 | `tools/build-image.sh --purge` 后重编 |
 
 ## 仓库结构
 
@@ -183,6 +185,10 @@ src/                上游源码仓（fetch-sources.sh 生成，不进 git）
 
 - 一张 SD/eMMC 卡**不能跨 SoC 通用**：loader 与 dtb 绑定 SoC，只能同族通用
   （RK3588+RK3588S、RK3566+RK3568）。
+- **rk3588 与 rk3576 家族都做到一份镜像通吃**：rk3588（Cat-5 / 4 / 4IO 及各 IO 变体）、
+  rk3576（Cat-3 / 3-V2 / 3IO）。镜像先用 `*-generic.dtb` 起来，首启由 `board-init`
+  读 SARADC 判定实板、把 `rk-kernel.dtb` 与 `uEnv.txt` 换成该板的，然后**自动重启一次**。
+  首次启动看到它自己重启属正常；判不出来会落回 generic。
 - 本工程自行生成 `parameter.txt`（boot 分区 256 MiB），**严禁与原厂 parameter 交叉烧写**。
 - **桌面走 mesa/llvmpipe 软件渲染**：X11 没有 Mali 的 DRI2/GLX 集成，属预期。
   GPU 本身可用（`Mali-G52` / OpenGL ES 3.2，1080p 清屏 ≈680 fps），但要经 GBM 平台
