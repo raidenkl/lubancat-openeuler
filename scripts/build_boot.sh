@@ -85,6 +85,10 @@ parseargs()
             make_cores=`echo $2`
             shift
             shift
+        elif [ "x$1" == "x--stage" ]; then
+            boot_stage=`echo $2`
+            shift
+            shift
         else
             echo `date` - ERROR, UNKNOWN params "$@"
             return 2
@@ -276,7 +280,18 @@ mk_extboot() {
     cp arch/arm64/boot/Image ${extboot_dir}/Image
     cp System.map            ${extboot_dir}/System.map-${kernelrelease}
     cp .config               ${extboot_dir}/config-${kernelrelease}
-    cp arch/arm64/boot/dts/${platform}/${dtb_name}.dtb ${extboot_dir}/rk-kernel.dtb
+    # rk-kernel.dtb 用「同 SoC 家族的 generic dtb」，而不是本板 dtb。
+    # 原因：board-init 是用户态服务，只有系统能起来它才会跑；如果初始 dtb 描述的是
+    # 另一块板（换板就卡在 CPU/外设上），board-init 永远没机会把 dtb 换成正确的。
+    # 用 generic 先起来 → board-init 读 SARADC 判定实板 → ln -sf 覆盖 rk-kernel.dtb → 重启生效。
+    # 这样一份镜像能在同一 SoC 家族内所有板子上开机（rk3588: Cat-5/4/4IO/各 IO 变体）。
+    init_dtb="${dtb_name}.dtb"
+    if [ "${extboot_generic_first:-0}" = 1 ] && [ -n "${extboot_generic_dtb}" ] && \
+       [ -f "arch/arm64/boot/dts/${platform}/${extboot_generic_dtb}" ]; then
+        init_dtb="${extboot_generic_dtb}"
+        LOG "initial rk-kernel.dtb = ${init_dtb} (generic; board-init will switch to the real board dtb)"
+    fi
+    cp "arch/arm64/boot/dts/${platform}/${init_dtb}" ${extboot_dir}/rk-kernel.dtb
     cp arch/arm64/boot/dts/${platform}/*.dtb            ${extboot_dir}/dtb/
     cp arch/arm64/boot/dts/${platform}/overlay/*.dtbo   ${extboot_dir}/dtb/overlay/ 2>/dev/null || true
     # dtbo 是 u-boot dtfile 的输入。原本只有 `|| true`，一个都没编出来时会静默放过，
@@ -300,6 +315,13 @@ mk_extboot() {
         # 无屏场景默认关闭 gsdt 自动探测，避免 i2c 探测噪声
         sed -i "s|^enable_gsdt_auto_load=.*|enable_gsdt_auto_load=0|" "$f"
     done
+
+    # uEnv.txt 同理用家族通用那份（已是 patch 过的副本），board-init 判定后覆盖成实板 uEnv
+    if [ "${extboot_generic_first:-0}" = 1 ] && [ -n "${extboot_generic_uenv}" ] && \
+       [ -f ${extboot_dir}/uEnv/${extboot_generic_uenv} ]; then
+        cp ${extboot_dir}/uEnv/${extboot_generic_uenv} ${extboot_dir}/uEnv/uEnv.txt
+        LOG "initial uEnv.txt = ${extboot_generic_uenv} (generic)"
+    fi
 
     cp ${cur_dir}/configs/common/boot.cmd ${extboot_dir}/boot.cmd
     mkimage -C none -A arm64 -T script -d ${extboot_dir}/boot.cmd ${extboot_dir}/boot.scr >/dev/null
@@ -400,6 +422,7 @@ mk_boot() {
 }
 
 kernel_defconfig=""
+boot_stage=all      # all | kernel | bootimg（由 build.sh 分两次调用）
 cur_dir=$(cd $(dirname $0);pwd)
 
 default_param
@@ -445,8 +468,51 @@ if [ ! -d ${log_dir} ];then mkdir -p ${log_dir}; fi
 if [ ! -f ${workdir}/.done ];then
     touch ${workdir}/.done
 fi
+LOG "build boot... (stage=${boot_stage})"
+
+# 内核重编判据：必须包含 System.map。内核编译中断（例如驱动报错）时 Image/dtb 可能是
+# 上一轮的残留，只看这两个文件会误判成"已编好"，随后 make install 因缺 System.map 失败。
+make_kernel_if_needed() {
+    clone_and_check_kernel_source
+    if [[ -f ${workdir}/kernel/arch/arm64/boot/dts/${platform}/${dtb_name}.dtb \
+       && -f ${workdir}/kernel/arch/arm64/boot/Image \
+       && -f ${workdir}/kernel/System.map ]];then
+        LOG "kernel is the latest"
+    else
+        make_kernel ${workdir}/kernel
+    fi
+}
+
+# ---------- 只编内核：产出 boot_dir 与 kernel-modules，供 rootfs 阶段装模块 ----------
+# 拆分原因：initrd 必须 chroot 进 aarch64 rootfs 生成（宿主 dracut 会打出 x86 initramfs），
+# 而 rootfs 又要用 kernel-modules，所以真实顺序只能是 内核 -> rootfs -> boot.img。
+if [ "x${boot_stage}" == "xkernel" ]; then
+    make_kernel_if_needed
+    LOSETUP_D_IMG
+    install_kernel
+    sed -i '/^kernel$/d;/^bootimg$/d' ${workdir}/.done   # 内核变了，旧 boot.img 作废
+    echo "kernel" >> ${workdir}/.done
+    LOG "kernel stage done: boot_dir 与 kernel-modules 就绪；boot.img 需等 rootfs 之后再打。"
+    exit 0
+fi
+
+# ---------- 只打 boot.img：要求 kernel 阶段已就绪 ----------
+if [ "x${boot_stage}" == "xbootimg" ]; then
+    if [ ! -f ${boot_dir}/Image ]; then
+        ERROR "boot_dir 缺 Image：先跑 build_boot.sh --stage kernel（见 docs/troubleshooting.md）"
+        exit 2
+    fi
+    trap 'LOSETUP_D_IMG' EXIT
+    LOSETUP_D_IMG
+    mk_boot
+    sed -i '/^bootimg$/d' ${workdir}/.done
+    echo "bootimg" >> ${workdir}/.done
+    LOG "The boot.img is generated in the ${workdir}."
+    exit 0
+fi
+
+# ---------- 默认 all：一次跑完（要求 rootfs.img 已存在，否则 mk_boot 会明确报错） ----------
 sed -i 's/bootimg//g' ${workdir}/.done
-LOG "build boot..."
 
 if [ "x${board}" == "xraspberrypi" ] && [ -z "${kernel_url}"  ]; then
     LOG "build an empty boot.img for Raspberry Pi."
@@ -458,24 +524,12 @@ if [ "x${board}" == "xraspberrypi" ] && [ -z "${kernel_url}"  ]; then
     exit 0
 fi
 
-clone_and_check_kernel_source
-
-# 判据必须包含 System.map：内核编译中断（例如驱动编译报错）时 Image/dtb 可能是
-# 上一轮的残留，只看这两个文件会误判成"已编好"，随后 make install 因缺 System.map 失败。
-if [[ -f ${workdir}/kernel/arch/arm64/boot/dts/${platform}/${dtb_name}.dtb \
-   && -f ${workdir}/kernel/arch/arm64/boot/Image \
-   && -f ${workdir}/kernel/System.map ]];then
-    LOG "kernel is the latest"
-else
-    make_kernel ${workdir}/kernel
-fi
-if [[ -f ${workdir}/boot.img && $(cat ${workdir}/.done | grep bootimg) == "bootimg" ]]; then
-    LOG "boot is the latest"
-else
-    trap 'LOSETUP_D_IMG' EXIT
-    LOSETUP_D_IMG
-    install_kernel
-    mk_boot
-fi
-LOG "The boot.img is generated in the ${workdir}."
+make_kernel_if_needed
+trap 'LOSETUP_D_IMG' EXIT
+LOSETUP_D_IMG
+install_kernel
+mk_boot
+sed -i '/^bootimg$/d;/^kernel$/d' ${workdir}/.done
+echo "kernel"  >> ${workdir}/.done
 echo "bootimg" >> ${workdir}/.done
+LOG "The boot.img is generated in the ${workdir}."

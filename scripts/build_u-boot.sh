@@ -127,16 +127,18 @@ use_prebuild_u-boot() {
     fi
 
     mkdir ${workdir}/u-boot
+    # 用 cp -a：bin/u-boot/<board>/ 下可能有子目录（例如变体备份），
+    # 裸 cp 会对目录报 "-r not specified" 并返回非 0，本脚本是 set -e，会直接中断构建。
     if [[ "x${platform}" == "xrockchip" ]]; then
-        cp ${local_uboot_dir}/* ${workdir}/u-boot
+        cp -a ${local_uboot_dir}/* ${workdir}/u-boot
     elif [[ "x${platform}" == "xphytium" ]]; then
         cp ${local_uboot_dir}/fip-all-sd-boot.bin ${workdir}/u-boot
         mkenvimage -s 0x1000 -o ${workdir}/u-boot/env.bin ${local_uboot_dir}/env.txt
         dd if=${workdir}/u-boot/env.bin of=${workdir}/u-boot/fip-all-sd-boot.bin bs=1k seek=1472 conv=notrunc
     elif [[ "x${platform}" == "xallwinner" ]]; then
-        cp ${local_uboot_dir}/* ${workdir}/u-boot
+        cp -a ${local_uboot_dir}/* ${workdir}/u-boot
     elif [[ "x${platform}" == "xamlogic" ]]; then
-        cp ${local_uboot_dir}/* ${workdir}/u-boot
+        cp -a ${local_uboot_dir}/* ${workdir}/u-boot
     else
         echo "target u-boot can not found!"
         exit 2

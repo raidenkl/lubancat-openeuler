@@ -173,10 +173,11 @@ if [ ! -d ${log_dir} ];then mkdir -p ${log_dir}; fi
 if [ -f ${workdir}/.done ];then
     LOG "Checking the previous build."
     if ! diff -q ${workdir}/.param_last ${workdir}/.param > /dev/null 2>&1 || \
-    [[ $(cat ${workdir}/.done | grep u-boot) == "u-boot" && \
-    $(cat ${workdir}/.done | grep bootimg) == "bootimg" && \
-    $(cat ${workdir}/.done | grep rootfs) == "rootfs" && \
-    $(cat ${workdir}/.done | grep image) == "image" ]];then
+    [[ $(cat ${workdir}/.done | grep -x u-boot) == "u-boot" && \
+    $(cat ${workdir}/.done | grep -x kernel) == "kernel" && \
+    $(cat ${workdir}/.done | grep -x bootimg) == "bootimg" && \
+    $(cat ${workdir}/.done | grep -x rootfs) == "rootfs" && \
+    $(cat ${workdir}/.done | grep -x image) == "image" ]];then
         LOG "Found complete build, clean build flag."
         rm ${workdir}/.done
         touch ${workdir}/.done
@@ -214,8 +215,9 @@ if [[ $(cat ${workdir}/.done | grep u-boot) != "u-boot" ]];then
     bash ${cur_dir}/build_u-boot.sh
 fi
 
-if [[ $(cat ${workdir}/.done | grep bootimg) != "bootimg" ]];then
-    bash ${cur_dir}/build_boot.sh
+# 内核先编：rootfs 阶段要把 kernel-modules 装进 rootfs
+if [[ $(cat ${workdir}/.done | grep -x kernel) != "kernel" ]];then
+    bash ${cur_dir}/build_boot.sh --stage kernel
 fi
 
 # 容器内以 root 构建时没有 sudo（openeuler 镜像未装）；非 root 才需要
@@ -244,6 +246,11 @@ if [[ $(cat ${workdir}/.done | grep rootfs) != "rootfs" ]];then
     bash ${cur_dir}/build_rootfs.sh
 fi
 
+# rootfs 就绪后才能 chroot 生成 aarch64 initrd，这里才打 boot.img
+if [[ $(cat ${workdir}/.done | grep -x bootimg) != "bootimg" ]];then
+    bash ${cur_dir}/build_boot.sh --stage bootimg
+fi
+
 case "${bootlayout}" in
     gpt)
         LOG "boot layout: gpt (SBC-sig generic, dd whole disk)"
@@ -254,3 +261,4 @@ case "${bootlayout}" in
         bash ${cur_dir}/gen_rk_update.sh -n ${name} -b ${board}
         ;;
 esac
+sed -i '/^image$/d' ${workdir}/.done; echo "image" >> ${workdir}/.done

@@ -70,8 +70,11 @@ usage() {
   --pkglist <file>               直接指定包清单文件（覆盖 --desktop）
 
 构建:
-  --stage <all|uboot|kernel|boot|rootfs|image>
-                                 跑到哪一步（默认 all）；kernel=只编内核+boot.img
+  --stage <all|uboot|kernel|rootfs|boot|image>
+                                 跑到哪一步（默认 all）
+                                 kernel=只编内核（rootfs 阶段要装它的模块）
+                                 rootfs=只做 rootfs.img
+                                 boot=只打 boot.img（需 kernel 与 rootfs 已就绪）
   --uboot-env <host|container>   u-boot 源码编在哪跑（默认 host；容器没有 python2）
   --layout <vendor|gpt>          镜像布局（默认 vendor）
   -n, --name <name>              镜像名（默认自动生成）
@@ -80,6 +83,9 @@ usage() {
   --repo-file <url>              rootfs 的 dnf 源（默认 openEuler-24.03-LTS-SP3/generic.repo）
   --jobs <N>                     并行度（默认 nproc）
   --clean <stage|all>            构建前清理（stage=rootfs.img；all=内核/rkpack/param）
+  --purge                        清掉所有编译产物后退出（内核/rkpack/rootfs/中间镜像/
+                                 断点/日志；保留交叉工具链与历史输出目录）
+  --purge-all                    同上，并删除 scripts/build/<日期>/ 的历史输出（不可恢复）
 
 其它:
   --list                         列出板卡矩阵后退出
@@ -108,6 +114,7 @@ STAGE=all
 UBOOT_ENV=host
 LAYOUT=vendor
 CLEAN=none
+PURGE=none      # none | mid | all
 DO_LIST=0
 LIST_FMT=table
 DRY_RUN=0
@@ -140,6 +147,8 @@ while [ "$#" -gt 0 ]; do
         --stage=*)        STAGE=${1#*=}; shift ;;
         --layout)         need_arg "$@"; LAYOUT=$2; shift 2 ;;
         --layout=*)       LAYOUT=${1#*=}; shift ;;
+        --purge)          PURGE=mid; shift ;;
+        --purge-all)      PURGE=all; shift ;;
         --clean)          need_arg "$@"; CLEAN=$2; shift 2 ;;
         --clean=*)        CLEAN=${1#*=}; shift ;;
         --jobs)           need_arg "$@"; JOBS=$2; shift 2 ;;
@@ -365,6 +374,59 @@ case "$CLEAN" in
     none|stage|all) ;;
     *) die "未知 --clean: $CLEAN（可用: stage all）" ;;
 esac
+
+# ---------- 清理编译产物 ----------
+# 为什么需要它：构建产物是「按 SoC 家族」落盘的（kernel/ 里是某一个 defconfig 的产物，
+# rkpack/ 里是上一个 SoC 的 boot.img + parameter + update.img）。换 SoC 再编时，
+# 断点 .done 会让 build.sh 跳过阶段、复用上一次的内核/打包中间件，表现为
+# afptool/parameter 报错、boot.img 里 dtb 不对，甚至 "source write-protected"。
+# 另外 mount/loop 是在**容器命名空间**里做的，宿主看不到，必须进容器解。
+purge_build() {
+    local drop_out="$1" before after
+    [ -d "$BUILD_DIR" ] || { info "没有构建目录: $BUILD_DIR"; return 0; }
+    before=$(du -sh "$BUILD_DIR" 2>/dev/null | cut -f1)
+
+    # 1) 残留挂载与 loop
+    if command -v docker >/dev/null 2>&1 && \
+       docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
+        docker exec -e BD="$CTR_WORKDIR/scripts/build" "$CONTAINER" sh -c '
+            for d in rootfs rootfs_tmp rk_root_tmp rk_boot_tmp rkpack extboot; do
+                p="$BD/$d"
+                if mountpoint -q "$p" 2>/dev/null; then
+                    umount -l "$p" 2>/dev/null && echo "  umount $p"
+                fi
+            done
+            losetup -a 2>/dev/null | grep -F "$BD/" | cut -d: -f1 | while read -r l; do
+                losetup -d "$l" 2>/dev/null && echo "  losetup -d $l"
+            done
+        ' || warn "容器内清理失败，若后面报 write-protected 请手工 umount"
+    elif mount 2>/dev/null | grep -q "$BUILD_DIR"; then
+        warn "检测到挂载但容器 $CONTAINER 没在跑；请手工 umount（mount | grep scripts/build）"
+    fi
+
+    # 2) 中间产物（保留 openeuler_gcc_arm64le 交叉工具链，重下很慢）
+    rm -rf "$BUILD_DIR/kernel" "$BUILD_DIR/rkpack" "$BUILD_DIR/rootfs" "$BUILD_DIR/extboot" \
+           "$BUILD_DIR/log" "$BUILD_DIR/tmp" "$BUILD_DIR/u-boot" \
+           "$BUILD_DIR/boot.img" "$BUILD_DIR/rootfs.img" \
+           "$BUILD_DIR/.done" "$BUILD_DIR/.param" "$BUILD_DIR/.param_last" \
+           "$BUILD_DIR/.ltb_board" "$BUILD_DIR/.ltb.lock" 2>/dev/null || true
+
+    # 3) 历史输出目录（--purge-all）
+    if [ "$drop_out" = 1 ]; then
+        find "$BUILD_DIR" -maxdepth 1 -type d \
+             -regextype posix-extended -regex '.*/[0-9]{4}-[0-9]{2}-[0-9]{2}' \
+             -exec rm -rf {} + 2>/dev/null || true
+    fi
+
+    after=$(du -sh "$BUILD_DIR" 2>/dev/null | cut -f1)
+    info "清理完成: $before -> $after（工具链保留；输出目录$([ "$drop_out" = 1 ] && echo "已删除" || echo "未动")）"
+}
+
+if [ "$PURGE" != none ]; then
+    info "清理编译产物: $BUILD_DIR"
+    if [ "$PURGE" = all ]; then purge_build 1; else purge_build 0; fi
+    exit 0
+fi
 case "$LIST_FMT" in
     table|tsv) ;;
     *) die "未知 --format: $LIST_FMT（可用: table tsv）" ;;
@@ -481,8 +543,11 @@ preflight() {
 
     if [ "$STAGE" = all ] || [ "$STAGE" = uboot ]; then
         if [ -z "$UBOOT_CFG" ]; then
-            [ -s "$SBC/bin/u-boot/$BOARD/u-boot.itb" ] || {
-                warn "缺预编译 u-boot: bin/u-boot/$BOARD/u-boot.itb（见 docs/building.md 新增板卡节）"
+            # 按 conf 的 local_uboot_dir 找，而不是按板名硬拼 bin/u-boot/<board>：
+            # 同 SoC 家族的板子共用一份预编译 u-boot（例如 Cat-4/Cat-4IO 复用 lubancat-5 的）
+            local ub="${LOCAL_UBOOT:-$SBC/bin/u-boot/$BOARD}"
+            [ -s "$ub/u-boot.itb" ] || {
+                warn "缺预编译 u-boot: $ub/u-boot.itb（conf 的 local_uboot_dir；见 docs/building.md 新增板卡节）"
                 err=1
             }
         fi
@@ -506,7 +571,13 @@ if [ "$VERBOSE" = 1 ]; then
     info "-------------------- 构建参数 --------------------"
     info "板卡        : $BOARD ($(board_display "$BOARD"))"
     info "SoC 家族    : $M_FAMILY   conf soc_name: ${SOC_NAME:--}"
-    info "dtb         : ${DTB:--}"
+    info "dtb         : ${DTB:--}（校验用；conf 里 dtb_name）"
+    GF=$(conf_get "$BOARD" extboot_generic_first)
+    if [ "${GF:-0}" = 1 ]; then
+        info "初始启动 dtb: $(conf_get "$BOARD" extboot_generic_dtb)（generic-first：一份镜像通吃同族，首启 board-init 换成实板后重启）"
+    else
+        info "初始启动 dtb: ${DTB:--}.dtb（本板 dtb）"
+    fi
     info "boot_size   : ${BOOT_SIZE:--} MiB"
     info "内核 defcfg : $M_KDEF"
     info "内核分支    : $KERNEL_BRANCH"
@@ -539,8 +610,7 @@ if [ "$DRY_RUN" = 0 ] && [ "$STAGE" = all ]; then
 
     case "$CLEAN" in
         stage) rm -f "$BUILD_DIR/rootfs.img" ;;
-        all)   rm -rf "$BUILD_DIR/kernel" "$BUILD_DIR/rkpack" "$BUILD_DIR/rootfs.img" \
-                      "$BUILD_DIR/boot.img" "$BUILD_DIR/.done" "$BUILD_DIR/.param" ;;
+        all)   purge_build 0 ;;   # 含挂载/loop 清理，避免换 SoC 时 "source write-protected"
         none)  : ;;
     esac
 fi
@@ -694,12 +764,14 @@ stage_image() {
 
 stage_sub() {
     local script=$1 name=$2
+    shift 2
+    local extra=("$@")
     [ "$DRY_RUN" = 1 ] || {
         [ -f "$BUILD_DIR/.param" ] || die "缺少 $BUILD_DIR/.param（先跑 --stage all）"
         grep -q "^board=$BOARD\$" "$BUILD_DIR/.param" || \
             die "$BUILD_DIR/.param 不是为 $BOARD 生成的（先跑 --stage all）"
     }
-    run bash "$SBC/$script" || die "$name 阶段失败（$script）"
+    run bash "$SBC/$script" "${extra[@]}" || die "$name 阶段失败（$script）"
     [ "$DRY_RUN" = 1 ] || info "$name 阶段完成"
 }
 
@@ -716,9 +788,9 @@ case "$STAGE" in
     all)    stage_all ;;
     image)  stage_image ;;
     uboot)  stage_sub build_u-boot.sh u-boot ;;
-    boot)   stage_sub build_boot.sh boot ;;
+    kernel) stage_sub build_boot.sh kernel --stage kernel ;;
+    boot)   stage_sub build_boot.sh boot   --stage bootimg ;;
     rootfs) stage_sub build_rootfs.sh rootfs ;;
-    kernel) stage_sub build_boot.sh kernel ;;
 esac
 
 info ""
