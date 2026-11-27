@@ -339,7 +339,16 @@ board_info ${BOARD_ID} ${SOC_type}
 # ---------------------------------------------------------------------------
 # 首次启动：落地选型结果（厂商动作序列，去掉 Debian 专属部分）
 # ---------------------------------------------------------------------------
-FLAG=$BOOT/.board_init
+FLAG=$BOOT/boot_init
+LEGACY_FLAG=$BOOT/.board_init
+
+# 标记文件名与厂商一致（/boot/boot_init），便于照文档排查/重置。
+# 兼容早期镜像：老标记 /boot/.board_init 存在就迁移过来，避免已经判过板的机器
+# 因"标记改名"被当成首启、白白再重启一次。
+if [ -e "$LEGACY_FLAG" ] && [ ! -e "$FLAG" ]; then
+	mv -f "$LEGACY_FLAG" "$FLAG" 2>/dev/null || true
+	echo "board-init: migrated marker $LEGACY_FLAG -> $FLAG"
+fi
 
 if [ -e "$FLAG" ]; then
 	echo "board-init: $FLAG exists, skip"

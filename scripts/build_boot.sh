@@ -277,7 +277,9 @@ mk_extboot() {
 
     pushd ${workdir}/kernel >/dev/null
     cp arch/arm64/boot/Image ${extboot_dir}/Image-${kernelrelease}
-    cp arch/arm64/boot/Image ${extboot_dir}/Image
+    # 不再额外拷一份 /Image：boot.cmd 已改为优先 /Image-<uname_r>（与厂商一致），
+    # 多拷一份会让 43 MB 的内核在 boot 分区里存两遍（256 MB 分区占掉 1/3），
+    # 而且 /Image 永远存在会让 uname_r 机制彻底失效（改 uEnv 切不了内核）。
     cp System.map            ${extboot_dir}/System.map-${kernelrelease}
     cp .config               ${extboot_dir}/config-${kernelrelease}
     # rk-kernel.dtb 用「同 SoC 家族的 generic dtb」，而不是本板 dtb。
@@ -309,10 +311,15 @@ mk_extboot() {
         # uEnv 原本没有 initrd= 行时，上面的替换不会生效；统一先删再插（与 BSP mk-kernel.sh 一致）
         sed -i "/^initrd=/d" "$f"
         sed -i "/^uname_r=/a initrd=initrd.img" "$f"
-        # cmdline 里补 root= 占位，由 gen_image.sh 统一替换成真实 ext4 UUID
+        # cmdline 里补 root= 占位，由 build_boot/gen_image 统一替换成真实 ext4 UUID
         # rd.shell：挂根失败时落到 initramfs 救援 shell，便于串口现场定位
         sed -i "s|^cmdline=\"\(.*\)\"|cmdline=\"\1 root=UUID=614e0000-0000-4b53-8000-1d28000054a9 rd.shell\"|" "$f"
-        # 无屏场景默认关闭 gsdt 自动探测，避免 i2c 探测噪声
+        # size：dtfile 把它当 uEnv.txt 的文本长度去 malloc（见 boot.cmd 第 8 步注释）。
+        # 模板里的 0x1000000（16 MiB）是个陷阱值，拿不到连续堆就静默跳过全部 overlay。
+        sed -i "s|^size=.*|size=0x8000|" "$f"
+        # gsdt 自动探测屏幕：厂商默认 1，我们默认 0。
+        # boot.cmd 已移植该逻辑（第 9 步），置 1 即可生效；默认 0 是为了不改现有行为
+        # （无屏的板子上避免 i2c 扫描噪声，且该路径尚未实机验证过亮屏）。
         sed -i "s|^enable_gsdt_auto_load=.*|enable_gsdt_auto_load=0|" "$f"
     done
 
@@ -327,6 +334,12 @@ mk_extboot() {
     mkimage -C none -A arm64 -T script -d ${extboot_dir}/boot.cmd ${extboot_dir}/boot.scr >/dev/null
     cp ${boot_dir}/initrd.img ${extboot_dir}/initrd.img 2>/dev/null || true
     cp -a ${boot_dir}/extlinux ${extboot_dir}/ 2>/dev/null || true
+    # extlinux 是 boot.scr 丢失时的兜底路径。模板里写的是 /Image（非 extboot 布局
+    # 只有这个文件），extboot 下要改成版本化名字 —— 否则删掉 /Image 之后这条兜底就断了。
+    if [ -f ${extboot_dir}/extlinux/extlinux.conf ]; then
+        sed -i "s|^\([[:space:]]*kernel[[:space:]]\+\)/Image[[:space:]]*$|\1/Image-${kernelrelease}|" \
+            ${extboot_dir}/extlinux/extlinux.conf
+    fi
 
     LOG "extboot dir ready: Image-${kernelrelease}, $(ls ${extboot_dir}/dtb/*.dtb | wc -l) dtb, $(ls ${extboot_dir}/dtb/overlay/*.dtbo 2>/dev/null | wc -l) dtbo, $(ls ${extboot_dir}/uEnv/*.txt | wc -l) uEnv"
 }
@@ -372,8 +385,16 @@ mk_boot() {
             cp ${cur_dir}/configs/common/extlinux.conf ${boot_dir}/extlinux
             sed -i "s|BOOTARGS|${bootargs}|g" ${boot_dir}/extlinux/extlinux.conf
             if [ "x${bootmode}" == "xextboot" ]; then
-                # 兜底路径的 fdt 指向 dtb/ 子目录，与 extboot 布局一致
-                sed -i "s|DEVICETREE|dtb/${dtb_name}.dtb|g" ${boot_dir}/extlinux/extlinux.conf
+                # 兜底路径的 fdt 指向 dtb/ 子目录，与 extboot 布局一致。
+                # 用 generic dtb（不是本板 dtb）：extlinux 只是 boot.scr 丢失时的兜底，
+                # 写死板型会让"一份镜像通吃同族"在这条兜底路径上失效 ——
+                # 把 4IO 的镜像插到 Cat-5、又恰好 boot.scr 损坏时，会拿 4io 的树起 Cat-5。
+                extlinux_dtb="dtb/${dtb_name}.dtb"
+                if [ "${extboot_generic_first:-0}" = 1 ] && [ -n "${extboot_generic_dtb}" ]; then
+                    extlinux_dtb="dtb/${extboot_generic_dtb}"
+                fi
+                sed -i "s|DEVICETREE|${extlinux_dtb}|g" ${boot_dir}/extlinux/extlinux.conf
+                LOG "extlinux fallback fdt = ${extlinux_dtb}"
             else
                 sed -i "s|DEVICETREE|${dtb_name}.dtb|g" ${boot_dir}/extlinux/extlinux.conf
             fi
@@ -431,7 +452,10 @@ parseargs "$@" || help $?
 
 source ${cur_dir}/boards/${board}.conf
 
-rockchip_bootargs="earlyprintk console=ttyS2,1500000 rw root=UUID=614e0000-0000-4b53-8000-1d28000054a9 rootfstype=ext4 init=/sbin/init rootwait"
+# console 与 uEnv 的 cmdline 保持一致：Rockchip 的 fiq-debugger 是 ttyFIQ0，
+# 而 ttyS2 被 fiq_debugger 占着（早期用 ttyS2 时串口只能看到 U-Boot 阶段）。
+# tty1 一起带上，HDMI/DP 上才有内核日志与 tty 文本。
+rockchip_bootargs="earlyprintk console=ttyFIQ0 console=tty1 consoleblank=0 loglevel=7 rw root=UUID=614e0000-0000-4b53-8000-1d28000054a9 rootfstype=ext4 init=/sbin/init rootwait"
 phytium_bootargs="console=ttyAMA1,115200 earlycon=pl011,0x2800d000 rw root=UUID=614e0000-0000-4b53-8000-1d28000054a9 rootfstype=ext4 rootwait cma=256m"
 allwinner_bootargs="console=tty0 console=ttyS0,115200 rw root=UUID=614e0000-0000-4b53-8000-1d28000054a9 rootfstype=ext4 rootwait earlycon clk_gnore_unused"
 amlogic_bootargs="console=ttyAML0,115200 console=tty1 consoleblank=0 root=UUID=614e0000-0000-4b53-8000-1d28000054a9 rootwait rootfstype=ext4 splash=verbose coherent_pool=2M loglevel=8"

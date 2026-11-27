@@ -45,6 +45,13 @@ if mount -o loop,ro "$BM" $B/l3boot 2>/dev/null; then
     ckhas "boot.cmd 记录 uEnv 真实长度" "setenv uenv_size" "$(cat $B/l3boot/boot.cmd 2>/dev/null)"
     ckhas "boot.cmd 覆盖 dtfile 的 size" "setenv size" "$(cat $B/l3boot/boot.cmd 2>/dev/null)"
     ckhas "boot.scr 已带上 uenv_size" "uenv_size" "$(strings $B/l3boot/boot.scr 2>/dev/null | tr '\n' ' ')"
+    # extboot 内核布局（与厂商一致：只放版本化的 Image-<uname_r>）
+    ck "boot.img 无裸 /Image" "no" "$([ -e $B/l3boot/Image ] && echo yes || echo no)"
+    ck "boot.img 版本化内核数" "1" "$(ls $B/l3boot/Image-* 2>/dev/null | wc -l)"
+    ckhas "extlinux 指向版本化内核" "kernel /Image-" "$(cat $B/l3boot/extlinux/extlinux.conf 2>/dev/null)"
+    ckhas "extlinux 兜底用 generic dtb" "generic.dtb" "$(grep -E '^[[:space:]]*fdt' $B/l3boot/extlinux/extlinux.conf 2>/dev/null)"
+    ck "uEnv size 已改 0x8000" "1" "$(grep -h '^size=' $B/l3boot/uEnv/*.txt 2>/dev/null | grep -c 'size=0x8000')"
+    ck "uEnv gsdt 默认关闭" "1" "$(grep -h '^enable_gsdt_auto_load=' $B/l3boot/uEnv/*.txt 2>/dev/null | grep -c '=0$')"
     umount $B/l3boot
 else
     ck "boot.img 可挂载" "yes" "no"
