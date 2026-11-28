@@ -27,7 +27,8 @@ the table below is only a summary:
 |---|---|---|---|
 | LubanCat-5 | RK3588 | ✅ Supported | alpha10: UKUI desktop boots; headless not verified separately |
 | LubanCat-3 | RK3576 | ✅ Supported | alpha6 (Cat-3 V2): automatic board detection, gigabit Ethernet, hostname, X desktop, GPU `Mali-G52` (1080p clear ≈1.5 ms/frame, ≈680 fps), 3.5 mm headphone audio, NPU 3.3 ms/inference, VPU 1080p encode 109 fps / decode 567 fps, `imx415` camera capture, rkaiq 3A installed and auto-started |
-| LubanCat-4 | RK3588S | ⏳ Pending | Missing `boards/lubancat-4.conf` and u-boot artifacts (`soc_name` must be `rk3588`) |
+| LubanCat-4 | RK3588S | ✅ Supported | 2026-11-28, on hardware: image boots and the UKUI desktop comes up. Shares u-boot/defconfig with Cat-5 (same family), only the dtb differs; peripherals (audio/camera/NPU) not verified one by one |
+| LubanCat-4IO | RK3588S | ✅ Supported | 2026-11-28, on hardware: as above. dtb `rk3588s-lubancat-4io`; generic first boot resolves `LubanCat-4IO` via SARADC and switches the dtb (serial log shows `Model: Embedfire LubanCat-4IO`) |
 | LubanCat-2 | RK3568 | ⏳ Pending | Missing conf and u-boot; `soc_name` must be `rk356x` |
 | LubanCat-1 | RK3566 | ⏳ Pending | Missing conf and u-boot; `ubootconfig` uses the `rk3566.config` fragment |
 | LubanCat-0 | RK3566 | ⏳ Pending | Besides conf/u-boot, the SARADC board-ID mapping needs calibration on real hardware |

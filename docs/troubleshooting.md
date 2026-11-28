@@ -662,3 +662,180 @@ chroot $M rpm -qa | grep -c ukui          # 应为几十个，不是 0
 chroot $M rpm -q lightdm
 umount $M
 ```
+
+## MIPI 屏有输出但全黑（背光被写成 0）
+
+现象：串口/HDMI 正常，MIPI 屏全黑，但显示链路每一层都是好的：
+
+```sh
+xrandr | grep DSI      # DSI-1 connected primary 1024x600+0+0
+dmesg | grep vop2      # vop2_crtc_atomic_enable: 1024x600p60, type:16(if:MIPI0)
+dmesg | grep -i dsi    # final DSI-Link bandwidth: 344453 x 4 Kbps
+cat /sys/class/backlight/backlight-dsi0/brightness   # ← 0
+```
+
+根因：`ukui-powermanagement-service`（**root 身份**，系统总线 D-Bus 激活）在桌面会话起来
+**约 20~30 秒**后执行
+
+```sh
+echo 0 | tee /sys/class/backlight/*/brightness
+```
+
+把背光写成 0。这块板没有电池，UPower 的 DisplayDevice 是合成的假设备（0%、无供电），
+它的"按电量降亮度/空闲熄屏"逻辑直接落到 0。**该行为不受任何 dconf 键控制** ——
+`backlight-battery-reduce=false`、`idle-dim-battery=false`、`brightness-bat=100.0`
+全试过仍归零；与会话里的 `ukui-powermanagement`、屏保、`auto-brightness` 插件也无关
+（逐个杀掉/关掉后仍归零）。
+
+> 注意区分：**会话里**那个叫 `ukui-powermanagement`（用户态），**真正写背光的是 root 的
+> `ukui-powermanagement-service`**。杀掉前者没有任何作用，这也是最容易走弯路的地方。
+
+### 镜像已默认禁用（作用域仅限 ukui）
+
+`build_rootfs.sh` 里由 `DESKTOP_QUIRKS()` 分派到 `DISABLE_UKUI_POWER_MGMT()`，
+判定依据是 **rootfs 里是否真的装了 ukui 的电源管理器**（
+`/usr/bin/ukui-powermanagement-service` 或它的 D-Bus 激活文件），
+不是镜像名、也不是板名：
+
+| 镜像 | 行为 |
+|---|---|
+| ukui | 摘掉 D-Bus 激活文件 + 去掉可执行位 |
+| xfce / dde / gnome / devstation | 不命中，一个文件都不改（各自用 `xfce4-power-manager` 等后端） |
+| headless | 不命中 |
+
+> 为什么不按桌面名判断：`tools/build-image.sh` 传给构建的是**清单路径**
+> （`-s .../rpmlist-lubancat-desktop`），桌面名在 `spec_param` 里已经丢失，
+> 按名字判断在这一层不可行。
+
+个别板子想保留原行为（例如临时要调亮度滑条），在 `scripts/boards/<board>.conf` 里加一行：
+
+```sh
+keep_ukui_power_mgmt=1
+```
+
+然后重做 rootfs 即可，不需要改代码。
+
+自查（板端）：
+
+```sh
+ls -l /usr/bin/ukui-powermanagement-service                    # 应无 x 位
+ls /usr/share/dbus-1/system-services/ | grep powermanagement   # 应只剩 .disabled
+```
+
+代价：桌面亮度滑条（经 D-Bus 调该服务）失效，同时失去电池/休眠 UI 与开机
+`governor=performance` / `power_dpm` 设置。要恢复滑条就删掉那两步操作。
+
+### 现场临时点亮
+
+```sh
+sudo pkill -f ukui-powermanagement-service
+sudo echo 200 > /sys/class/backlight/backlight-dsi0/brightness
+```
+
+不停服务只改亮度没用 —— 20~30 秒后会被再写回 0。
+
+### 定位手法（下次可复用）
+
+板上既没有 auditd（内核也没开 CONFIG_AUDIT），也没有 `/proc/*/io`，`inotify` 也拿不到写入者：
+
+1. 用 ftrace 挂 `backlight_device_set_brightness` + `options/func_stack_trace`。
+   **关键：读 trace 前不要切 `current_tracer`（切到 nop 会清空 ring buffer）**，
+   只把 `tracing_on` 置 0 再读；否则会看到"0 条记录"而误以为函数不可挂。
+2. 这样只能拿到 comm（本例是 `tee`）。再用 `/usr/bin/tee` 包装器（备份成 `tee.real`）
+   记录 `$PPID` 的 cmdline、`/proc/$PPID/cgroup`，一步就能定位到具体服务与单元。
+
+## 内核 rpm 装不上 / 装了没生效
+
+### 1. `/boot` 未挂载 → 明确拒绝
+
+```
+ERROR: /boot 未挂载（应为 LABEL=boot 的独立分区）。
+       现在装会把 Image 写进 rootfs 的 /boot 目录，重启仍是旧内核。
+```
+
+这是 `%pre` 的保护。`/boot` 在 rootfs 里只是个空目录，真机上是 ext2 分区；
+不挂载就装，rpm 会报成功但文件落在 rootfs，表现就是"装了没生效"。
+
+```sh
+findmnt /boot            # 有输出才是挂上了
+mount /boot              # 没挂上先挂
+```
+
+> 构建机 / 离线 chroot 里不会报这个错：`build_rootfs.sh` 会写
+> `/etc/lubancat/build-host`，`%pre`/`%post` 见到就直接跳过。
+> 首启由 `firstboot.sh` 删掉这个标记。
+
+### 2. 空间不足被拦
+
+```
+ERROR: /boot 剩余 42 MiB，至少需要 100 MiB。
+```
+
+单版本实测约 68.5 MiB（Image 41.7 + initrd 19.7 + System.map 6.6 + config 0.2），
+dtb/dtbo 全族共用不重复占空间。`%post` 会保留"当前 + 最近 1 个"，即 2 版约 143 MiB。
+
+```sh
+ls -1t /boot/Image-* | tail -n +3 | sed 's|.*/Image-||'   # 列出可删的旧版本
+```
+
+### 3. 装完 `uname_r` 没变
+
+```sh
+T=$(readlink -f /boot/uEnv/uEnv.txt); sed -n 's/^uname_r=//p' "$T"
+```
+
+- 若是旧版本：说明 `/etc/lubancat/build-host` 还在（构建机标记没被删）。
+  `rm -f /etc/lubancat/build-host` 后重装。
+- 若是新版本但 `uname -r` 还是旧的：`reboot` 了吗？串口里应有
+  `[boot.cmd] load /Image-<新版本>`。
+
+### 4. 回滚
+
+编辑实体文件（不要直接对 `uEnv.txt` 用 `sed -i`，它是软链，`sed -i` 会把它变成普通文件，
+之后 board-init 再也切不了板型）：
+
+```sh
+T=$(readlink -f /boot/uEnv/uEnv.txt)
+sed -i 's|^uname_r=.*|uname_r=6.1.99-rk3588|'      "$T"   # 改成旧版本
+sed -i 's|^initrd=.*|initrd=initrd-6.1.99-rk3588|' "$T"
+reboot
+```
+
+### 5. 装完重启卡在等待占位 UUID（2026-11-28 实际发生）
+
+```
+[*     ] A start job is running for /dev/dis…-8000-1d28000054a9 (2min 11s / no limit)
+```
+
+`614e0000-0000-4b53-8000-1d28000054a9` 是**构建期占位 UUID**，`gen_rk_update.sh` 打包时
+只把它在 `rkpack/Image/boot.img` 里替换成真实值，**不改** `scripts/build/extboot/`。
+早期版本的内核 rpm 从 `extboot/uEnv/*.txt` 取载荷，于是装包把板上的 uEnv 覆盖成占位值，
+内核于是永远等一个不存在的设备（cmdline 里有 `rootwait`，systemd 那个 job 是 `no limit`）。
+
+**已修**：内核 rpm 不再包含 `uEnv/*.txt`（只由 `%post` 改 `uname_r`/`initrd` 两行）。
+恢复办法（板上 uEnv 已被覆盖时）：
+
+```sh
+# U-Boot 里走 extlinux 兜底（extlinux.conf 是打包时改过的，UUID 正确）
+sysboot mmc 0:2 any ${scriptaddr} /extlinux/extlinux.conf
+
+# 进系统后修正 uEnv
+for f in /boot/uEnv/uEnv*.txt; do
+  sed -i 's|root=UUID=614e0000-0000-4b53-8000-1d28000054a9|root=UUID=6f1c2a10-4b3e-4d55-9c8a-2f5d0b7e1a01|g' "$f"
+done
+sync && reboot
+```
+
+`6f1c2a10-...` 是 `gen_rk_update.sh` 的默认 `rootfs_uuid`（可用 `--rootfs-uuid` 覆盖）。
+
+### 6. 新 dtbo 装上了但没生效
+
+内核 rpm 现在**不带 uEnv**，所以 `dtoverlay=` 启用行不会随包更新。检查顺序：
+
+```sh
+ls -l /boot/dtb/overlay/<你的 dtbo>                  # 1. 文件在不在（应在）
+readlink -f /boot/uEnv/uEnv.txt | xargs grep dtoverlay  # 2. 有没有对应启用行
+grep -h '^enable_uboot_overlays' /boot/uEnv/*.txt    # 3. 必须 =1，否则整段 overlay 都跳过
+```
+
+缺哪一条补哪一条，`sync && reboot` 后生效。

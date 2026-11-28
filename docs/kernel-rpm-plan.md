@@ -1,6 +1,6 @@
 # P3 实施计划：内核以 rpm 形式更新（`kerneldeb` 的 openEuler 等价物）
 
-> 状态：**未执行，等决策**
+> 状态：**已实施**（2026-11-28）。实施结果与本文的偏差见文末《实施记录》。
 > 目标：把厂商那套「拷 deb 到 `/boot/kerneldeb` → 首启 `apt install` → 重启换内核」
 > 换成 openEuler 的做法，让"换内核"不再等于"重刷整包镜像"。
 > 参照文档：`extboot的三个特殊机制.md` 第四节。
@@ -246,3 +246,52 @@ keep=2
    但已出的镜像必须重刷才能享受（分区表在烧写时定型）。
 4. **镜像是否预装内核 rpm** —— 建议不预装：`/boot` 继续由构建灌注，rpm 只作升级通道，
    避免"同一份内核在镜像里存两遍"（那正是我们刚在 P1 里省掉的 43 MB）。
+
+---
+
+## 八、实施记录（2026-11-28）
+
+四个决策点的结论：**双包 / 构建期生成并版本化 initrd / 全系统一 256 MiB（含 Cat-3 从 512 改小）/ 不预装**。
+
+### 与本文的三处偏差（都是实施时才发现的事实）
+
+1. **打包阶段不能在"编完内核后"**：`initrd` 由 `mk_initrd.sh` chroot 进 `rootfs.img` 生成，
+   属于 bootimg 阶段。所以 `build.sh` 里的 `kernelrpm` 阶段放在 **bootimg 之后**；
+   缺 initrd 时打包脚本直接报错并提示先跑 bootimg。
+2. **initrd 版本化不必改 `boot.cmd` 的加载逻辑**：`boot.cmd` 本来就用 `${initrd}` 变量，
+   而 `initrd=` 是 `build_boot.sh` 逐板写进 `uEnv` 的。改 uEnv 即可，`boot.cmd` 只加
+   "uEnv 值 → `initrd-<uname_r>` → `initrd.img`"三级回退（本文写的两次 `load` 会白读一次 20 MB）。
+3. **构建机标记不能放 `/boot/build-host`**：真机上 `/boot` 是独立分区，挂载会**盖住**
+   rootfs 里 `/boot` 下的同名文件 —— 标记既看不见也删不掉。改用 `/etc/lubancat/build-host`。
+
+### 额外发现
+
+- `rpmbuild` 在 x86_64 上打 aarch64 包必须带 `--rcfile pkg/rpmrc-aarch64`
+  （里面补了 `buildarch_compat: x86_64: aarch64`），否则报
+  `No compatible architectures found for build` —— 现有 `build-rpms.sh` 早就这么做了。
+- 载荷里**不能带 `uEnv.txt`**：真机上它是 board-init 建的软链，rpm 用普通文件覆盖会破坏换板能力。
+  包只装 `uEnvLubanCat*.txt`。
+- 空间实测：单版本 68.5 MiB，256 MiB 的 boot 可放 3 版；`%post` 保留 2 版（约 143 MiB）。
+
+### 验收
+
+`build/check_kernel_rpm.sh`：**PASS=24 FAIL=0**，含 `/boot` 未挂载必须拒绝、把 `boot.img`
+挂成 `/boot` 后在 rootfs overlay 副本上真实安装（`uname_r` 改写、`uEnv.txt` 仍为软链、
+旧版本按策略清理）。板上实装与回滚**未做**（需要你操作）。
+
+### 载荷边界：uEnv 不进包（方案 A）
+
+首轮实现把 `uEnv/*.txt` 打进了 image 包，结果装机把板上正确的 `root=UUID` 覆盖成构建期
+占位值 `614e0000-...`，重启卡在 `A start job is running for /dev/disk/by-uuid/614e0000-...`。
+
+原因：`gen_rk_update.sh` 只在打包用的 `rkpack/Image/boot.img` 里替换占位 UUID，
+不回写 `scripts/build/extboot/`，而 rpm 正是从 extboot 取载荷。
+
+改法（方案 A）：
+- image 包**不再含** `/boot/uEnv/*.txt`；`%post` 改为就地修改板上现有 uEnv 的
+  `uname_r` 与 `initrd=` 两行（`readlink -f` 取实体，绝不动软链）。
+- `tools/build-kernel-rpm.sh` 加断言：载荷里出现占位 UUID 就拒绝打包。
+- 验收加断言：安装前后 `root=UUID` 必须一致。
+
+代价：新增的 `dtoverlay=` 启用行不随内核包下发（dtbo 文件本身会更新），
+需手工加一行或随镜像更新 —— 见 `docs/troubleshooting.md` 第 6 条。

@@ -102,6 +102,54 @@ boot 分区里放的是**整个 SoC 家族**的 dtb 与 uEnv（`build_boot.sh` �
 - 想回滚：把 `uname_r` 改回旧版本号（旧 Image 没删就能直接回）；
 - **不要再往 `/boot/Image` 拷**：那是旧布局的兜底名，只在 `uname_r` 缺失/文件不存在时才会用到。
 
+**板上换内核（rpm）**：`--stage all` 走完会自动产出两个包
+
+```
+scripts/bin/rpms/<soc>/kernel-lubancat-<ver>-<rel>.aarch64.rpm           Image/System.map/config/initrd/dtb/dtbo
+scripts/bin/rpms/<soc>/kernel-lubancat-modules-<ver>-<rel>.aarch64.rpm   /lib/modules/<kver>
+```
+
+**包里刻意不含 `/boot/uEnv/*.txt`**：uEnv 里的 `cmdline="... root=UUID=..."` 是镜像打包时
+（`gen_rk_update.sh`）才替换成真实值的，内核包携带它就会把板上正确的 UUID 覆盖成构建期占位值。
+实测过一次：装完重启卡在 `A start job is running for /dev/disk/by-uuid/614e0000-...`。
+所以 uEnv 归镜像管，`%post` 只就地改里面的 `uname_r` 与 `initrd=` 两行。
+
+代价：**新增的 `dtoverlay=` 启用行不会随内核包下发**（dtbo 文件本身会更新）。
+要让新 dtbo 生效，手工在当前 uEnv 里加一行，或等镜像更新：
+
+```sh
+T=$(readlink -f /boot/uEnv/uEnv.txt)
+echo 'dtoverlay=rk3588s-lubancat-4io-xxx-overlay' >> "$T"
+```
+
+单独打：`tools/build-kernel-rpm.sh --soc rk3588`（`--list` 只看会打什么）。
+宿主一般没装 `rpm-build`，脚本检测不到 `rpmbuild` 时会自动 `docker exec` 进构建容器执行，
+并在结束时把产物属主改回调用者。
+**注意它必须排在 bootimg 之后** —— `initrd-<kver>` 是 chroot 进 rootfs 生成的，
+打包脚本的前置检查会拦住缺 initrd 的情况。
+
+板上升级（两个包一起装，`Requires` 会校验版本一致）：
+
+```sh
+rpm -ivh kernel-lubancat-modules-*.rpm kernel-lubancat-[0-9]*.rpm
+reboot && uname -r
+```
+
+回滚：编辑当前在用的 `/boot/uEnv/` 实体文件（`uEnv.txt` 是软链，用 `readlink -f` 取），
+把 `uname_r` 与 `initrd=` 改回旧版本后重启。`%post` 会保留"当前 + 最近 1 个"共 2 个版本。
+
+装机校验（离线、不用板子）：
+
+```sh
+build/check_kernel_rpm.sh --soc rk3588
+```
+
+它会验载荷清单、依赖、`/boot` 未挂载时必须拒绝安装，以及把 `boot.img` 挂成 `/boot` 后
+在 rootfs 的 overlay 副本上真装一次（检查 `uname_r` 改写、`uEnv.txt` 仍是软链、旧版清理）。
+
+镜像**不预装**这两个包：`/boot` 仍由构建直接灌注，rpm 只作后续升级通道，
+避免同一份内核在镜像里存两遍。
+
 **通用屏自动识别**（`enable_gsdt_auto_load`）：`boot.cmd` 已移植厂商那套
 「读背板 EEPROM → 叠 `gsdt_plugin0/1`」的逻辑，但构建期默认写 `0`。
 要启用就在板子上改 `/boot/uEnv/<板>.txt`：

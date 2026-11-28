@@ -24,8 +24,8 @@ openEuler 24.03 LTS SP3 镜像的构建工程。基于 openEuler SBC-sig 的构�
 |---|---|---|---|
 | LubanCat-5 | RK3588 | ✅ 已支持 | alpha10：ukui 桌面可进；headless 未单独验证 |
 | LubanCat-3 | RK3576 | ✅ 已支持 | alpha6（Cat-3 V2）：板型自动识别、千兆网口、主机名、X 桌面、GPU `Mali-G52`（1080p 清屏 ≈1.5 ms/帧、≈680 fps）、3.5mm 耳机有声、NPU 3.3 ms/次、VPU 1080p 编 109 fps / 解 567 fps、摄像头 `imx415` 取帧、rkaiq 3A 已装并自启 |
-| LubanCat-4 | RK3588S | 🔧 可构建，待实机验证 | conf 已补；u-boot/defconfig 与 Cat-5 共用（同族），差异只在 dtb |
-| LubanCat-4IO | RK3588S | 🔧 可构建，待实机验证 | 同 Cat-4，dtb 用 `rk3588s-lubancat-4io` |
+| LubanCat-4 | RK3588S | ✅ 已支持 | 2026-11-28 实机：镜像可启动、ukui 桌面可进。u-boot/defconfig 与 Cat-5 共用（同族），差异只在 dtb；音频/相机/NPU 等外设未逐项验证 |
+| LubanCat-4IO | RK3588S | ✅ 已支持 | 2026-11-28 实机：同上。dtb 用 `rk3588s-lubancat-4io`，generic 首启经 SARADC 判定为 `LubanCat-4IO` 并切 dtb（串口 `Model: Embedfire LubanCat-4IO` 可证） |
 | LubanCat-2 | RK3568 | ⏳ 待补齐 | 缺 conf 与 u-boot；`soc_name` 要写 `rk356x` |
 | LubanCat-1 | RK3566 | ⏳ 待补齐 | 缺 conf 与 u-boot；`ubootconfig` 用 `rk3566.config` fragment |
 | LubanCat-0 | RK3566 | ⏳ 待补齐 | 除 conf/u-boot 外，还需实机标定 SARADC 板型映射 |
@@ -157,6 +157,65 @@ docker exec oe-lubancat-build uname -m     # 期望 aarch64
 | 「检测到 build/ 下有残留挂载」 | 上次构建异常退出 | `mount \| grep scripts/build` 后 `umount`，再 `losetup -d` |
 | 换 SoC/板卡后报 `afptool`/`parameter` 错、或 boot.img 里 dtb 不对 | 复用了上一个 SoC 的内核与打包中间件 | `tools/build-image.sh --purge` 后重编 |
 
+## 内核 rpm（板上换内核，不用重刷镜像）
+
+`--stage all` 走完会在 `scripts/bin/rpms/<soc>/` 额外产出两个包（排在打包之前，因为包里要带 initrd）：
+
+| 包 | 内容 | 体积 |
+|---|---|---|
+| `kernel-lubancat-<ver>-<rel>.aarch64.rpm` | `Image-<kver>` / `System.map` / `config` / `initrd-<kver>` / `dtb` / `dtbo` | ~34 MB |
+| `kernel-lubancat-modules-<ver>-<rel>.aarch64.rpm` | `/lib/modules/<kver>` | ~24 MB |
+
+单独打（需已有内核与 initrd 产物，即构建至少跑到 bootimg 阶段；宿主没有 `rpmbuild` 时脚本会自动进构建容器执行）：
+
+```bash
+tools/build-kernel-rpm.sh --soc rk3588            # 产出到 scripts/bin/rpms/rk3588/
+tools/build-kernel-rpm.sh --soc rk3588 --list     # 只看会打哪些文件、多大，不打包
+```
+
+板上安装 —— **两个包放同一条命令**（`Requires` 校验版本一致；只装 image 包会报缺依赖）：
+
+```bash
+rpm -ivh kernel-lubancat-modules-*.rpm kernel-lubancat-[0-9]*.rpm
+reboot && uname -r
+```
+
+回滚（`uEnv.txt` 是软链，必须改它指向的实体，否则会把软链变成普通文件、板型再也切不回来）：
+
+```bash
+T=$(readlink -f /boot/uEnv/uEnv.txt)
+sed -i 's|^uname_r=.*|uname_r=<旧版本>|; s|^initrd=.*|initrd=initrd-<旧版本>|' "$T"
+reboot
+```
+
+离线验收（不需要板子，在构建容器里跑）：
+
+```bash
+build/check_kernel_rpm.sh --soc rk3588
+```
+
+它会验载荷清单、依赖、`/boot` 未挂载时必须拒绝，以及把 `boot.img` 挂成 `/boot` 后
+在 `rootfs.img` 的 overlay 副本上真装一次（`uname_r` 改写、`uEnv.txt` 仍是软链、
+`root=UUID` 不被改动、旧版本按策略清理）。
+
+四条必须知道的约束：
+
+- **包里不含 `/boot/uEnv/*.txt`**。uEnv 里的 `cmdline="... root=UUID=..."` 是**打包时**
+  才由 `gen_rk_update.sh` 替换成真实值的；内核包若携带它，装机就会把板上正确值覆盖成
+  构建期占位值（实测会卡在 `A start job is running for /dev/disk/by-uuid/614e0000-...`）。
+  所以 uEnv 归镜像管，`%post` 只就地改 `uname_r` 与 `initrd=` 两行。
+- 由此带来：**新增的 `dtoverlay=` 启用行不随内核包下发**（dtbo 文件本身会更新）。
+  新 dtbo 要在当前 uEnv 里手工加一行，或等镜像更新。
+- `/boot` 未挂载时 `%pre` 直接拒绝安装 —— 否则 Image 会写进 rootfs 的 `/boot` 目录，
+  rpm 报成功、重启还是旧内核。
+- boot 分区 256 MiB，单版本实测约 68.5 MiB（Image 41.7 + initrd 19.7 + System.map 6.6 +
+  config 0.2，dtb/dtbo 全族共用）。`%post` 保留"当前 + 最近 1 个"共 2 版；
+  装新版本前 `/boot` 需 ≥100 MiB 空闲，否则 `%pre` 拦截。
+
+镜像**不预装**这两个包：`/boot` 仍由构建直接灌注，rpm 只作后续升级通道。
+升级/回滚细节、失败自查见 [docs/building.md](docs/building.md) 与
+[docs/troubleshooting.md](docs/troubleshooting.md)。
+
 ## 仓库结构
 
 ```
@@ -166,8 +225,9 @@ scripts/bin/        工具、固件、厂商二进制（libmali / npu / multimed
 scripts/boards/     板级配置（每块板一个 .conf，含 POST_BOARD_OVERLAY）+ matrix.tsv
 scripts/configs/    包清单、内核 defconfig、boot.cmd、extlinux
 scripts/overlay/    rootfs 覆盖层（板型识别、音频/相机服务单元、X11 配置）
-tools/              构建入口（build-image.sh 一键出镜像、build-rpms.sh 打 rkaiq 包）
-pkg/                RPM 打包源（SPECS + SOURCES，目前为 camera-engine-rkaiq）
+tools/              构建入口（build-image.sh 一键出镜像、build-rpms.sh 打 rkaiq 包、
+                    build-kernel-rpm.sh 打内核 image/modules 双包）
+pkg/                RPM 打包源（SPECS + SOURCES：camera-engine-rkaiq、kernel-lubancat*）
 manifests/          构建溯源：source-lock、各版本摘要、校验和
 docs/               本项目的工程文档（与上游 documents/ 区分）
 build/              本地构建辅助脚本与板端测试程序（产物不入库）

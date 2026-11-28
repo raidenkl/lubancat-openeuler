@@ -379,14 +379,15 @@ ES8388 R2 = ff, R4 = c0                  # 数字部分全关、左右 DAC 掉�
 |---|---|---|---|
 | Cat-3 / 3IO / Cat-3-V2（rk3576） | ES8388（es8323 驱动） | `rockchip-es8388` | ✅ **已接线，实机验证有声** |
 | Cat-5 / 5-V2 / 5iob / 5iof / 5io-aibox1（rk3588） | ES8388 | `rockchip-es8388` | ✅ 结构逐字相同（同为 `Headphone<-LOUT1/ROUT1` + `hp-con` 使能脚），已接线；**但 Cat-5 另有 PL330 DMA 故障，DMA 修好前装上也仍然无声** |
-| Cat-4 / 4IO（rk3588s） | ES8388 | `rockchip-es8388` | ✅ 结构相同，等该板 conf 落地后生效（当前 `matrix.tsv` 是 blocked） |
+| Cat-4 / 4IO（rk3588s） | ES8388 | `rockchip-es8388` | ✅ 结构逐字相同，conf 已落地并接线；未逐项实测出声（PL330 DMA 故障与 Cat-5 同源） |
 | Cat-1HS / Q1IO（rk3528） | ES8388 | `rockchip-es8388` | ⚠️ codec 相同、理应适用，但仓库还没有 rk3528 的 board conf，未接线 |
 | Cat-1 / 1H / 1N / 2 / 2H / 2N（rk356x） | RK809（PMIC 内 codec） | `rockchip-rk809` | ❌ 不适用：没有 `OUT1` 这个输出混音器，声卡名也不匹配，脚本直接跳过 |
 | Cat-0（rk3566） | dts 里无 codec 节点 | — | ❌ 不适用：没有模拟音频输出 |
 
 **结论**：修复对"用 ES8388 + multicodecs 卡"的板型（Cat-3/4/5 全系及其 IO 变体）有效，
-对 RK809 与无 codec 的板型不适用、也不需要。当前只有 Cat-3、Cat-5 两个 conf 装了该单元，
-其余板型加 4 行 install 即可（脚本本身不用改）。
+对 RK809 与无 codec 的板型不适用、也不需要。当前 Cat-3、Cat-5 的 conf 已装该单元，
+Cat-4/4IO 的 conf 由 Cat-5 conf 复制而来、同样包含；其余板型加 4 行 install 即可
+（脚本本身不用改）。
 
 ### 排查这类"看着正常却没声"的顺序
 
