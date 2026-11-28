@@ -19,8 +19,8 @@
 #
 # family	board	kern_defconfig	kern_branch	status	note
 rk3588	lubancat-5	lubancat_linux_rk3588_defconfig	lbc-develop-6.1	verified	alpha10 实机通过（ukui + headless 待补）
-rk3588	lubancat-4	lubancat_linux_rk3588_defconfig	lbc-develop-6.1	buildable	RK3588S；u-boot/defconfig 与 lubancat-5 共用（同族），差异只在 dtb；待实机验证
-rk3588	lubancat-4io	lubancat_linux_rk3588_defconfig	lbc-develop-6.1	buildable	Cat-4 的 4-IO 变体，dtb 用 rk3588s-lubancat-4io；待实机验证
+rk3588	lubancat-4	lubancat_linux_rk3588_defconfig	lbc-develop-6.1	verified	RK3588S；u-boot/defconfig 与 lubancat-5 共用（同族），差异只在 dtb；2026-11-28 实机通过（启动 + ukui 桌面）
+rk3588	lubancat-4io	lubancat_linux_rk3588_defconfig	lbc-develop-6.1	verified	Cat-4 的 4-IO 变体，dtb 用 rk3588s-lubancat-4io；2026-11-28 实机通过（启动 + ukui 桌面，generic 首启识别为 LubanCat-4IO）
 rk3576	lubancat-3	lubancat_linux_rk3576_defconfig	lbc-develop-6.1	verified	alpha6 实机通过：板型/网口/主机名/X桌面/overlay/GPU 684fps/3.5mm 有声/NPU 299fps/VPU 109fps/摄像头取帧；rkaiq 已装并自启；镜像通吃 3/3-V2/3IO（generic-first）
 rk356x	lubancat-2	lubancat_linux_rk356x_defconfig	lbc-develop-6.1	blocked:conf,uboot	RK3568；soc_name 写 rk356x
 rk356x	lubancat-1	lubancat_linux_rk356x_defconfig	lbc-develop-6.1	blocked:conf,uboot	RK3566；ubootconfig 用 rk3566.config（fragment）

@@ -12,6 +12,14 @@ set -e
 MARK=/var/lib/lubancat/firstboot.done
 mkdir -p /var/lib/lubancat
 
+# 0) 删掉构建机标记：镜像里的 /etc/lubancat/build-host 用来让内核 rpm 在构建机/离线
+#    chroot 里跳过安装动作（不改 uname_r、不 depmod）。留着会让板上
+#    `rpm -ivh kernel-lubancat` 静默什么都不做。
+#
+#    为什么不是厂商的 /boot/build-host：真机上 /boot 是独立分区，挂载后会盖住 rootfs
+#    里 /boot 下的同名文件，标记既看不见也删不掉。
+rm -f /etc/lubancat/build-host
+
 # 1) machine-id（正常由 systemd 首启动生成，这里兜底）
 if [ ! -s /etc/machine-id ]; then
     systemd-machine-id-setup 2>/dev/null || true

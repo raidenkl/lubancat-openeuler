@@ -177,6 +177,7 @@ if [ -f ${workdir}/.done ];then
     $(cat ${workdir}/.done | grep -x kernel) == "kernel" && \
     $(cat ${workdir}/.done | grep -x bootimg) == "bootimg" && \
     $(cat ${workdir}/.done | grep -x rootfs) == "rootfs" && \
+    $(cat ${workdir}/.done | grep -x kernelrpm) == "kernelrpm" && \
     $(cat ${workdir}/.done | grep -x image) == "image" ]];then
         LOG "Found complete build, clean build flag."
         rm ${workdir}/.done
@@ -249,6 +250,19 @@ fi
 # rootfs 就绪后才能 chroot 生成 aarch64 initrd，这里才打 boot.img
 if [[ $(cat ${workdir}/.done | grep -x bootimg) != "bootimg" ]];then
     bash ${cur_dir}/build_boot.sh --stage bootimg
+fi
+
+# 内核 rpm：包里要带 initrd-<kver>，而 initrd 是 bootimg 阶段 chroot 进 rootfs 生成的，
+# 所以这一步必须排在 bootimg 之后（计划书原写"编完内核后打"与"包内带 initrd"是冲突的）。
+# 产物进 scripts/bin/rpms/<soc>/，板上 `rpm -ivh` 即可换内核，不必重刷整包镜像。
+#
+# 只在 extboot 布局 + rockchip 上做：gpt 布局与非 rockchip 平台没有 extboot/Image-* 那一套，
+# 内核不通过 /boot 更新，打包脚本会因缺产物直接失败。
+if [ "x${bootmode}" == "xextboot" ] && [ "x${platform}" == "xrockchip" ] && \
+   [[ $(cat ${workdir}/.done | grep -x kernelrpm) != "kernelrpm" ]];then
+    bash ${cur_dir}/../tools/build-kernel-rpm.sh --soc ${soc_name} \
+        || { ERROR "build kernel rpm failed"; exit 2; }
+    echo "kernelrpm" >> ${workdir}/.done
 fi
 
 case "${bootlayout}" in

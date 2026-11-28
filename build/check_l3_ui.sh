@@ -52,6 +52,9 @@ if mount -o loop,ro "$BM" $B/l3boot 2>/dev/null; then
     ckhas "extlinux 兜底用 generic dtb" "generic.dtb" "$(grep -E '^[[:space:]]*fdt' $B/l3boot/extlinux/extlinux.conf 2>/dev/null)"
     ck "uEnv size 已改 0x8000" "1" "$(grep -h '^size=' $B/l3boot/uEnv/*.txt 2>/dev/null | grep -c 'size=0x8000')"
     ck "uEnv gsdt 默认关闭" "1" "$(grep -h '^enable_gsdt_auto_load=' $B/l3boot/uEnv/*.txt 2>/dev/null | grep -c '=0$')"
+    # initrd 版本化：与 Image-<kver> 成对，回滚时旧内核才拿得到自己那份
+    ck "boot.img 有版本化 initrd" "yes" "$([ "$(ls $B/l3boot/initrd-* 2>/dev/null | wc -l)" -gt 0 ] && echo yes || echo no)"
+    ck "uEnv 的 initrd= 全部版本化" "0" "$(grep -h '^initrd=' $B/l3boot/uEnv/*.txt 2>/dev/null | grep -vc 'initrd-')"
     umount $B/l3boot
 else
     ck "boot.img 可挂载" "yes" "no"

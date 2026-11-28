@@ -171,6 +171,65 @@ dnf_install_set() {
     return 1
 }
 
+# 关掉 ukui-powermanagement-service（root 身份、系统总线 D-Bus 激活）。
+#
+# 为什么：它会在桌面会话起来约 20~30 秒后执行
+#     echo 0 | tee /sys/class/backlight/*/brightness
+# 把背光写成 0。MIPI 屏表现就是"桌面全黑"——DSI 连接器 connected、VOP 在输出、
+# X 也在渲染（xrandr 里 DSI-1 primary 1024x600），只是背光关着，于是完全看不见。
+# 现场排查时极易误判成 DSI/面板/dtb 问题（本次就走过这个弯路）。
+#
+# 该行为不受任何 dconf 键控制（backlight-battery-reduce=false、idle-dim-battery=false、
+# brightness-bat=100.0 全部试过，仍归零）；也与会话里的 ukui-powermanagement、屏保、
+# auto-brightness 插件无关（逐个杀掉/关掉后仍归零）。实测只有禁用它才停止写入：
+# 去掉可执行位 + 摘掉 D-Bus 激活文件后，重启 lightdm 观察 100 秒，亮度稳定不再被改写。
+#
+# 代价（明示）：桌面亮度滑条失效（它经 D-Bus 调这个服务）、失去电池/休眠 UI，
+# 以及开机时该服务顺带做的 governor=performance / power_dpm 设置。
+# 这几块板没有电池，取舍可接受；将来要恢复亮度滑条，删掉下面两行即可。
+#
+# 作用域：ukui 专有。不要直接调用，统一由 DESKTOP_QUIRKS() 分派。
+DISABLE_UKUI_POWER_MGMT() {
+    local svc=${rootfs_dir}/usr/bin/ukui-powermanagement-service
+    local act=${rootfs_dir}/usr/share/dbus-1/system-services/org.ukui.powermanagement.service
+
+    # 兜底：正常入口是 DESKTOP_QUIRKS()，这里再判一次，保证被直接调用时也不会误伤
+    if [ ! -e "${svc}" ] && [ ! -e "${act}" ]; then
+        return 0
+    fi
+
+    if [ -f "${act}" ]; then
+        mv "${act}" "${act}.disabled"
+        LOG "ukui-powermanagement: 已摘除 D-Bus 激活（org.ukui.powermanagement.service -> .disabled）"
+    fi
+
+    if [ -f "${svc}" ]; then
+        chmod -x "${svc}"
+        LOG "ukui-powermanagement: 已去掉可执行位（不再把 /sys/class/backlight/*/brightness 写 0）"
+    fi
+}
+
+DESKTOP_QUIRKS() {
+    # 板级逃生开关：boards/<board>.conf 里写 keep_ukui_power_mgmt=1 即保留原行为
+    if [ "${keep_ukui_power_mgmt:-0}" = "1" ]; then
+        LOG "desktop quirks: keep_ukui_power_mgmt=1，保留 ukui 电源服务"
+        return 0
+    fi
+
+    # 判定依据是"rootfs 里是否真的装了 ukui 的电源管理器"，而不是镜像名或板名：
+    #   - build-image.sh 传下来的是清单路径（-s .../rpmlist-lubancat-desktop），
+    #     桌面名在 spec_param 里已经丢失，按名字判断在本层不可行；
+    #   - xfce/dde/gnome 用的是各自的后端（xfce4-power-manager 等），不会命中；
+    #   - headless 更不会命中。
+    # 这样 ukui 的修补天然只作用于 ukui 镜像，将来加桌面互不影响。
+    if [ -e "${rootfs_dir}/usr/bin/ukui-powermanagement-service" ] \
+       || [ -e "${rootfs_dir}/usr/share/dbus-1/system-services/org.ukui.powermanagement.service" ]; then
+        DISABLE_UKUI_POWER_MGMT
+    else
+        LOG "desktop quirks: 未安装 ukui 电源管理，跳过 ukui 专有修补"
+    fi
+}
+
 INSTALL_PACKAGES(){
     tmp_repo_info=$2
     dnf_chroot makecache --nogpgcheck || LOG "makecache: 有仓库不可用，已跳过（继续装包）"
@@ -357,6 +416,23 @@ build_rootfs() {
     echo "LABEL=rootfs  / ext4    defaults,noatime 0 0" > ${rootfs_dir}/etc/fstab
     echo "LABEL=boot  /boot ext2    defaults,noatime 0 2" >> ${rootfs_dir}/etc/fstab
     LOG "Set fstab done."
+
+    # 标记"这是构建机灌出来的 rootfs"。内核 rpm 的 %pre/%post 见到它就跳过挂载检查与
+    # uname_r 改写 —— 否则镜像构建时装内核包（或离线 chroot 验证）要么写进 rootfs 的
+    # /boot 目录（假成功），要么因"没挂载"直接失败。首启时 firstboot.sh 负责删掉。
+    #
+    # 位置用 /etc/lubancat/ 而不是厂商的 /boot/build-host：真机上 /boot 是独立分区，
+    # 挂载后会**盖住** rootfs 里 /boot 下的同名文件 —— 标记既看不见也删不掉。
+    # /etc 在 rootfs 上，任何时刻都可见。
+    mkdir -p ${rootfs_dir}/etc/lubancat
+    touch ${rootfs_dir}/etc/lubancat/build-host
+    LOG "mark /etc/lubancat/build-host (kernel rpm 跳过安装动作的构建机标记)"
+
+    # 桌面相关的构建期修补（目前只有 ukui 的电源服务一项），按"装了什么组件"分派，
+    # 不按镜像名、不按板名 —— 见 DESKTOP_QUIRKS() 的注释。
+    # 放在 POST_BOARD_OVERLAY 之前：板级 hook 可能再装/改包，这里先做一次兜底，
+    # 且此时 rootfs 仍完整可用（/dev /proc /sys 还没 umount）。
+    DESKTOP_QUIRKS
 
     POST_BOARD_OVERLAY
 

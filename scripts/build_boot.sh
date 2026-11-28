@@ -310,7 +310,9 @@ mk_extboot() {
         sed -i "s|^uname_r=.*|uname_r=${kernelrelease}|" "$f"
         # uEnv 原本没有 initrd= 行时，上面的替换不会生效；统一先删再插（与 BSP mk-kernel.sh 一致）
         sed -i "/^initrd=/d" "$f"
-        sed -i "/^uname_r=/a initrd=initrd.img" "$f"
+        # initrd 版本化：uEnv 里写 initrd-<kver>，与 Image-<kver> 成对。
+        # 否则回滚时"旧 Image + 新 initrd"会因 /lib/modules 路径对不上而挂不住根。
+        sed -i "/^uname_r=/a initrd=initrd-${kernelrelease}" "$f"
         # cmdline 里补 root= 占位，由 build_boot/gen_image 统一替换成真实 ext4 UUID
         # rd.shell：挂根失败时落到 initramfs 救援 shell，便于串口现场定位
         sed -i "s|^cmdline=\"\(.*\)\"|cmdline=\"\1 root=UUID=614e0000-0000-4b53-8000-1d28000054a9 rd.shell\"|" "$f"
@@ -333,6 +335,14 @@ mk_extboot() {
     cp ${cur_dir}/configs/common/boot.cmd ${extboot_dir}/boot.cmd
     mkimage -C none -A arm64 -T script -d ${extboot_dir}/boot.cmd ${extboot_dir}/boot.scr >/dev/null
     cp ${boot_dir}/initrd.img ${extboot_dir}/initrd.img 2>/dev/null || true
+    # 版本化副本进 extboot：内核 rpm 打包时从这里取，boot 分区里也留一份与 Image-<kver> 配对。
+    # 同时保留 initrd.img（老镜像的 uEnv 写的是它，boot.cmd 的第二三级回退也用它）。
+    # 版本化副本：内核 rpm 的载荷来源，也让 boot 分区里 initrd 与 Image-<kver> 成对
+    #（回滚时旧内核要拿到自己那份 initrd，dracut 产出的 initrd 依赖 /lib/modules/<ver>）
+    if [ -s ${boot_dir}/initrd.img ]; then
+        cp -f ${boot_dir}/initrd.img ${extboot_dir}/initrd-${kernelrelease}
+        LOG "initrd 版本化: initrd-${kernelrelease} ($(du -h ${extboot_dir}/initrd-${kernelrelease} | cut -f1))"
+    fi
     cp -a ${boot_dir}/extlinux ${extboot_dir}/ 2>/dev/null || true
     # extlinux 是 boot.scr 丢失时的兜底路径。模板里写的是 /Image（非 extboot 布局
     # 只有这个文件），extboot 下要改成版本化名字 —— 否则删掉 /Image 之后这条兜底就断了。
@@ -363,6 +373,9 @@ mk_boot() {
             ERROR "initrd.img missing and rootfs.img absent; run build_rootfs.sh first (host dracut would build an unusable x86 initramfs)"
             exit 2
         fi
+
+        # 版本化副本在 mk_extboot() 里做：kernelrelease 只在那里赋值，
+        # 这个函数（mk_boot）里它是空的 —— 曾因此在 boot_dir 生成过一个名为 "initrd-" 的空名文件。
 
         LOG "gen extlinux config for $dtb_name"
         if [ "${platform}" == "rockchip" ];then

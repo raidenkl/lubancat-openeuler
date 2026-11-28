@@ -15,10 +15,30 @@ fi
 # 2) 组装 bootargs：cmdline 已含 root=UUID=（构建期写入），这里只补 boot_part
 setenv bootargs ${cmdline} boot_part=${distro_bootpart}
 
-# 3) initrd（可选）
+# 3) initrd（可选，三级回退）
+#    1) uEnv 里的 initrd=  —— 新镜像写的是 initrd-<uname_r>（版本化：回滚时"旧 Image + 新 initrd"
+#       会因为模块路径对不上而挂不住根，版本化才能一起回退）
+#    2) /initrd-<uname_r>  —— uEnv 还写着旧值 initrd.img、但盘上已经是版本化文件名
+#    3) /initrd.img        —— 老镜像 / 兜底
+#    先显式置 0：下面 booti 用 ${initrd_size} != 0 判断要不要带 initrd，
+#    变量未定义时 hush 会把它展开成空串，`test  != 0` 直接报语法错。
+setenv initrd_size 0
 if test -n "${initrd}"; then
   if load ${devtype} ${devnum}:${distro_bootpart} ${ramdisk_addr_r} /${initrd}; then
     setenv initrd_size ${filesize}
+    echo [boot.cmd] load /${initrd}
+  fi
+fi
+if test "${initrd_size}" = "0" && test -n "${uname_r}"; then
+  if load ${devtype} ${devnum}:${distro_bootpart} ${ramdisk_addr_r} /initrd-${uname_r}; then
+    setenv initrd_size ${filesize}
+    echo [boot.cmd] load /initrd-${uname_r}
+  fi
+fi
+if test "${initrd_size}" = "0"; then
+  if load ${devtype} ${devnum}:${distro_bootpart} ${ramdisk_addr_r} /initrd.img; then
+    setenv initrd_size ${filesize}
+    echo [boot.cmd] load /initrd.img (fallback)
   fi
 fi
 
